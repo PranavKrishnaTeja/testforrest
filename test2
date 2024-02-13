@@ -1,1 +1,38 @@
-test2
+import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
+import com.datastax.oss.driver.api.querybuilder.update.Update;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+
+// ...
+
+private PreparedStatement prepareUpdateWithAllColumns(QueryInfo queryInfo, boolean deleteEvent) {
+    // Access session from the queryInfo object or from the class scope
+    CqlSession session = queryInfo.getSession();
+
+    // Begin building the UPDATE statement for the specified table
+    Update update = QueryBuilder.update(queryInfo.getYBTable());
+
+    // Create an Update with assignments
+    Update updateWithAssignments = update;
+
+    // Loop through the columns and create assignments
+    for (QueryColumn column : queryInfo.getColumns()) {
+        if (column.getMappingType() == MappingType.JSONB_MAP) {
+            // For JSONB_MAP type, handle accordingly. This is just an example and may need to be adjusted.
+            updateWithAssignments = deleteEvent 
+                ? updateWithAssignments.removeAll(column.getName(), QueryBuilder.bindMarker(column.getName()))
+                : updateWithAssignments.append(column.getName(), QueryBuilder.bindMarker(column.getName()));
+        } else {
+            updateWithAssignments = updateWithAssignments.set(column.getName(), QueryBuilder.bindMarker(column.getName()));
+        }
+    }
+
+    // Add WHERE conditions based on primary key columns
+    for (QueryColumn column : queryInfo.getPrimaryKeyColumns()) {
+        updateWithAssignments = updateWithAssignments.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker(column.getName()));
+    }
+
+    // Build the SimpleStatement and prepare the final UPDATE statement
+    PreparedStatement preparedStatement = session.prepare(updateWithAssignments.build());
+
+    return preparedStatement;
+}

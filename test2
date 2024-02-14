@@ -1,39 +1,28 @@
-import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
-import com.datastax.oss.driver.api.querybuilder.update.Assignment;
-import com.datastax.oss.driver.api.querybuilder.update.Update;
-import com.datastax.oss.driver.api.querybuilder.update.UpdateStart;
-import com.datastax.oss.driver.api.querybuilder.update.UpdateWhere;
+   // Start building the UPDATE statement for the specified table
+    Update updateStart = QueryBuilder.update(queryInfo.getYBTable());
 
-
-
-private PreparedStatement prepareUpdateWithAllColumns(QueryInfo queryInfo, boolean deleteEvent) {
-    Update update = QueryBuilder.update(queryInfo.getYbTable());
-    Update updateWithAssignments = null;
-
+    // Loop through the columns and create assignments
     for (QueryColumn column : queryInfo.getColumns()) {
-        Assignment assignment;
         if (column.getMappingType() == MappingType.JSONB_MAP) {
-            assignment = deleteEvent ? QueryBuilder.removeAll(column.getName(), QueryBuilder.bindMarker()) : QueryBuilder.putAll(column.getName(), QueryBuilder.bindMarker());
+            // Assuming 'removeAll' and 'putAll' are methods to handle JSONB_MAP columns.
+            // In actual code, replace with the correct methods from the QueryBuilder API.
+            if (deleteEvent) {
+                updateStart = updateStart.removeAll(column.getName(), QueryBuilder.bindMarker(column.getName()));
+            } else {
+                updateStart = updateStart.putAll(column.getName(), QueryBuilder.bindMarker(column.getName()));
+            }
         } else {
-            assignment = QueryBuilder.set(column.getName(), QueryBuilder.bindMarker());
+            updateStart = updateStart.set(column.getName(), QueryBuilder.bindMarker(column.getName()));
         }
-        updateWithAssignments = updateWithAssignments == null ? update.with(assignment) : updateWithAssignments.and(assignment);
     }
 
-    if (updateWithAssignments == null) {
-        return null;
-    }
-
-    UpdateWhere where = null;
+    // Add the WHERE conditions
     for (QueryColumn column : queryInfo.getPrimaryKeyColumns()) {
-        where = where == null ? updateWithAssignments.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker()) : where.andColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker());
+        updateStart = updateStart.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker(column.getName()));
     }
 
-    if (where == null) {
-        return null;
-    }
+    // Finalize the UPDATE statement into a SimpleStatement
+    SimpleStatement simpleStatement = updateStart.build();
 
-    return cache.getPreparedStatement(session, where.asCql());
-}
+    // Prepare the statement with the session and return the PreparedStatement
+    return session.prepare(simpleStatement);

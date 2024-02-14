@@ -1,3 +1,13 @@
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
+import com.datastax.oss.driver.api.querybuilder.update.Assignment;
+import com.datastax.oss.driver.api.querybuilder.update.Update;
+import com.datastax.oss.driver.api.querybuilder.update.UpdateStart;
+import com.datastax.oss.driver.api.querybuilder.update.UpdateWhere;
+
+
+
 private PreparedStatement prepareUpdateWithAllColumns(QueryInfo queryInfo, boolean deleteEvent) {
     Update update = QueryBuilder.update(queryInfo.getYbTable());
     Update updateWithAssignments = null;

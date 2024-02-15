@@ -1,9 +1,9 @@
-DeleteSelection deleteSelection = QueryBuilder.deleteFrom(queryInfo.getYbTable());
+Delete deleteQuery = QueryBuilder.deleteFrom(queryInfo.getYbTable());
 
     boolean hasConditions = false;
 
     for (QueryColumn column : queryInfo.getPrimaryKeyColumns()) {
-        deleteSelection = deleteSelection.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker());
+        deleteQuery = deleteQuery.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker());
         hasConditions = true;
     }
 
@@ -11,5 +11,5 @@ DeleteSelection deleteSelection = QueryBuilder.deleteFrom(queryInfo.getYbTable()
         return null;
     }
 
-    // Assuming cache.getPreparedStatement() expects a CQL string
-    return cache.getPreparedStatement(deleteSelection.asCql());
+    SimpleStatement statement = deleteQuery.build();
+    return cache.getPreparedStatement(statement.getQuery());

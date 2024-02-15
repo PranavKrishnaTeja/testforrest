@@ -11,4 +11,5 @@ Delete deleteQuery = QueryBuilder.deleteFrom(queryInfo.getYbTable());
         return null;
     }
 
-    return cache.getPreparedStatement(deleteQuery.build());
+    // Directly prepare the Delete statement without calling build()
+    return cache.getPreparedStatement(deleteQuery.asCql());

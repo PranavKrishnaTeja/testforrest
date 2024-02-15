@@ -1,15 +1,63 @@
-Delete deleteQuery = QueryBuilder.deleteFrom(queryInfo.getYbTable());
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
-    boolean hasConditions = false;
+import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
-    for (QueryColumn column : queryInfo.getPrimaryKeyColumns()) {
-        deleteQuery = deleteQuery.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker());
-        hasConditions = true;
+public class YugaByteStatementExecutorTest {
+
+    @Mock
+    private CqlSession session;
+
+    @Mock
+    private Cache cache; // Assuming you have a Cache interface for getPreparedStatement
+
+    private YugaByteStatementExecutor yugaByteStatementExecutor;
+
+    @Before
+    public void setup() {
+        MockitoAnnotations.openMocks(this);
+        yugaByteStatementExecutor = new YugaByteStatementExecutor(session, cache);
     }
 
-    if (!hasConditions) {
-        return null;
+    @Test
+    public void testPrepareDeleteWithPrimaryKeyColumns() {
+        QueryInfo queryInfo = mock(QueryInfo.class);
+        when(queryInfo.getYbTable()).thenReturn("test_table");
+        when(queryInfo.getPrimaryKeyColumns()).thenReturn(Arrays.asList(
+            new QueryColumn("id"),
+            new QueryColumn("name")
+        ));
+
+        PreparedStatement expectedPreparedStatement = mock(PreparedStatement.class);
+        when(cache.getPreparedStatement(any(CqlSession.class), any(SimpleStatement.class)))
+            .thenReturn(expectedPreparedStatement);
+
+        PreparedStatement actualPreparedStatement = yugaByteStatementExecutor.prepareDeleteWithPrimaryKeyColumns(queryInfo, session);
+
+        assertNotNull(actualPreparedStatement);
+        assertEquals(expectedPreparedStatement, actualPreparedStatement);
+        verify(cache).getPreparedStatement(eq(session), any(SimpleStatement.class));
     }
 
-    SimpleStatement statement = deleteQuery.build();
-    return cache.getPreparedStatement(session, statement);
+    // Additional test cases...
+
+    // Helper class to mock QueryColumn
+    static class QueryColumn {
+        private final String name;
+
+        QueryColumn(String name) {
+            this.name = name;
+        }
+
+        String getName() {
+            return name;
+        }
+    }
+}

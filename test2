@@ -1,28 +1,14 @@
-   // Start building the UPDATE statement for the specified table
-    Update updateStart = QueryBuilder.update(queryInfo.getYBTable());
+Delete deleteQuery = QueryBuilder.deleteFrom(queryInfo.getYbTable());
 
-    // Loop through the columns and create assignments
-    for (QueryColumn column : queryInfo.getColumns()) {
-        if (column.getMappingType() == MappingType.JSONB_MAP) {
-            // Assuming 'removeAll' and 'putAll' are methods to handle JSONB_MAP columns.
-            // In actual code, replace with the correct methods from the QueryBuilder API.
-            if (deleteEvent) {
-                updateStart = updateStart.removeAll(column.getName(), QueryBuilder.bindMarker(column.getName()));
-            } else {
-                updateStart = updateStart.putAll(column.getName(), QueryBuilder.bindMarker(column.getName()));
-            }
-        } else {
-            updateStart = updateStart.set(column.getName(), QueryBuilder.bindMarker(column.getName()));
-        }
-    }
+    boolean hasConditions = false;
 
-    // Add the WHERE conditions
     for (QueryColumn column : queryInfo.getPrimaryKeyColumns()) {
-        updateStart = updateStart.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker(column.getName()));
+        deleteQuery = deleteQuery.whereColumn(column.getName()).isEqualTo(QueryBuilder.bindMarker());
+        hasConditions = true;
     }
 
-    // Finalize the UPDATE statement into a SimpleStatement
-    SimpleStatement simpleStatement = updateStart.build();
+    if (!hasConditions) {
+        return null;
+    }
 
-    // Prepare the statement with the session and return the PreparedStatement
-    return session.prepare(simpleStatement);
+    return cache.getPreparedStatement(deleteQuery.build());

@@ -12,4 +12,4 @@ Delete deleteQuery = QueryBuilder.deleteFrom(queryInfo.getYbTable());
     }
 
     SimpleStatement statement = deleteQuery.build();
-    return cache.getPreparedStatement(statement.getQuery());
+    return cache.getPreparedStatement(session, statement);

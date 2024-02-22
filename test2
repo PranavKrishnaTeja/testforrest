@@ -1,5 +1,7 @@
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.Test;
+import static org.junit.Assert.assertEquals;
 
 @Test
 public void testCsvParsing() throws Exception {
@@ -8,18 +10,27 @@ public void testCsvParsing() throws Exception {
 
     ObjectMapper objectMapper = new ObjectMapper();
 
+    // Assuming you have a list of expected offerOrderld values for each event
+    List<Long> expectedOfferOrderIds = Arrays.asList(1235455L, 1235455L); // Add more as needed
+
+    int index = 0;
+
     for (MessageData messageData : parsed) {
         JsonNode rootNode = objectMapper.readTree(messageData.getPayload());
         JsonNode eventsNode = rootNode.path("events");
 
         if (eventsNode.isArray()) {
             for (JsonNode eventNode : eventsNode) {
-                if (eventNode.has("orderid")) {
-                    long orderId = eventNode.get("orderid").asLong();
-                    // Perform your assertions here
-                    System.out.println("Extracted orderid: " + orderId);
+                if (eventNode.has("offerOrderld")) {
+                    long offerOrderId = eventNode.get("offerOrderld").asLong();
+
+                    // If the expected and actual values match, this assertion will pass
+                    assertEquals("offerOrderld does not match at index " + index, 
+                                 expectedOfferOrderIds.get(index), Long.valueOf(offerOrderId));
+                    index++;
                 }
             }
         }
     }
+    // If all assertions pass, the test case will pass
 }

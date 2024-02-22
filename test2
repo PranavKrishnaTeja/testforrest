@@ -1,63 +1,25 @@
-import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.core.cql.SimpleStatement;
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+@Test
+public void testCsvParsing() throws Exception {
+    String content = ResourceFiles.getContent("your_test_csv_file.csv");
+    List<MessageData> parsed = csvMessageParser.parse(content, eventStoreListenerLog);
 
-public class YugaByteStatementExecutorTest {
+    ObjectMapper objectMapper = new ObjectMapper();
 
-    @Mock
-    private CqlSession session;
+    for (MessageData messageData : parsed) {
+        JsonNode rootNode = objectMapper.readTree(messageData.getPayload());
+        JsonNode eventsNode = rootNode.path("events");
 
-    @Mock
-    private Cache cache; // Assuming you have a Cache interface for getPreparedStatement
-
-    private YugaByteStatementExecutor yugaByteStatementExecutor;
-
-    @Before
-    public void setup() {
-        MockitoAnnotations.openMocks(this);
-        yugaByteStatementExecutor = new YugaByteStatementExecutor(session, cache);
-    }
-
-    @Test
-    public void testPrepareDeleteWithPrimaryKeyColumns() {
-        QueryInfo queryInfo = mock(QueryInfo.class);
-        when(queryInfo.getYbTable()).thenReturn("test_table");
-        when(queryInfo.getPrimaryKeyColumns()).thenReturn(Arrays.asList(
-            new QueryColumn("id"),
-            new QueryColumn("name")
-        ));
-
-        PreparedStatement expectedPreparedStatement = mock(PreparedStatement.class);
-        when(cache.getPreparedStatement(any(CqlSession.class), any(SimpleStatement.class)))
-            .thenReturn(expectedPreparedStatement);
-
-        PreparedStatement actualPreparedStatement = yugaByteStatementExecutor.prepareDeleteWithPrimaryKeyColumns(queryInfo, session);
-
-        assertNotNull(actualPreparedStatement);
-        assertEquals(expectedPreparedStatement, actualPreparedStatement);
-        verify(cache).getPreparedStatement(eq(session), any(SimpleStatement.class));
-    }
-
-    // Additional test cases...
-
-    // Helper class to mock QueryColumn
-    static class QueryColumn {
-        private final String name;
-
-        QueryColumn(String name) {
-            this.name = name;
-        }
-
-        String getName() {
-            return name;
+        if (eventsNode.isArray()) {
+            for (JsonNode eventNode : eventsNode) {
+                if (eventNode.has("orderid")) {
+                    long orderId = eventNode.get("orderid").asLong();
+                    // Perform your assertions here
+                    System.out.println("Extracted orderid: " + orderId);
+                }
+            }
         }
     }
 }

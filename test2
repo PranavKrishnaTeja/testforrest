@@ -1,36 +1,39 @@
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
-import static org.junit.Assert.assertEquals;
+import org.junit.runner.RunWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnitRunner;
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
 
-@Test
-public void testCsvParsing() throws Exception {
-    String content = ResourceFiles.getContent("your_test_csv_file.csv");
-    List<MessageData> parsed = csvMessageParser.parse(content, eventStoreListenerLog);
+@RunWith(MockitoJUnitRunner.class)
+public class EnrollmentTransformerTest {
 
-    ObjectMapper objectMapper = new ObjectMapper();
+    @Mock
+    private ReferenceDataRepository referenceDataRepository;
 
-    // Assuming you have a list of expected offerOrderld values for each event
-    List<Long> expectedOfferOrderIds = Arrays.asList(1235455L, 1235455L); // Add more as needed
+    @InjectMocks
+    private EnrollmentTransformer enrollmentTransformer;
 
-    int index = 0;
+    @Test
+    public void testPopulateIdsSetsOfferOrderId() {
+        // Given
+        Enrollment enrollment = new Enrollment();
+        enrollment.setOfferOrderId("12345");
+        enrollment.setOfferId("67890");
+        // ... set other necessary fields on enrollment as needed
 
-    for (MessageData messageData : parsed) {
-        JsonNode rootNode = objectMapper.readTree(messageData.getPayload());
-        JsonNode eventsNode = rootNode.path("events");
+        EnrollmentResource enrollmentResource = new EnrollmentResource();
 
-        if (eventsNode.isArray()) {
-            for (JsonNode eventNode : eventsNode) {
-                if (eventNode.has("offerOrderld")) {
-                    long offerOrderId = eventNode.get("offerOrderld").asLong();
+        String expectedProductResourceKey = "productKey";
+        when(referenceDataRepository.getProductResourceKeyFromId(anyInt())).thenReturn(expectedProductResourceKey);
 
-                    // If the expected and actual values match, this assertion will pass
-                    assertEquals("offerOrderld does not match at index " + index, 
-                                 expectedOfferOrderIds.get(index), Long.valueOf(offerOrderId));
-                    index++;
-                }
-            }
-        }
+        // When
+        enrollmentTransformer.populateIds(enrollment, enrollmentResource);
+
+        // Then
+        assertNotNull("Enrollment ID should not be null", enrollmentResource.getEnrollmentId());
+        assertEquals("Offer Order ID should match the expected value", Long.valueOf(12345), enrollmentResource.getOfferOrderId());
+        // ... assert other fields as necessary
     }
-    // If all assertions pass, the test case will pass
 }

@@ -1,39 +1,32 @@
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.MockitoJUnitRunner;
-import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
+// ... other imports as before
+import static org.junit.Assert.assertThrows;
 
-@RunWith(MockitoJUnitRunner.class)
-public class EnrollmentTransformerTest {
-
-    @Mock
-    private ReferenceDataRepository referenceDataRepository;
-
-    @InjectMocks
-    private EnrollmentTransformer enrollmentTransformer;
+public class ArcataServiceRegistryLocatorImplTest {
+    // ... other setup code as before
 
     @Test
-    public void testPopulateIdsSetsOfferOrderId() {
-        // Given
-        Enrollment enrollment = new Enrollment();
-        enrollment.setOfferOrderId("12345");
-        enrollment.setOfferId("67890");
-        // ... set other necessary fields on enrollment as needed
+    public void getRabbitListenerEndpoint_ShouldThrowServiceNotFoundException() {
+        // Arrange
+        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
 
-        EnrollmentResource enrollmentResource = new EnrollmentResource();
+        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer))
+                .thenThrow(new ServiceNotFoundException("Service not found"));
 
-        String expectedProductResourceKey = "productKey";
-        when(referenceDataRepository.getProductResourceKeyFromId(anyInt())).thenReturn(expectedProductResourceKey);
-
-        // When
-        enrollmentTransformer.populateIds(enrollment, enrollmentResource);
-
-        // Then
-        assertNotNull("Enrollment ID should not be null", enrollmentResource.getEnrollmentId());
-        assertEquals("Offer Order ID should match the expected value", Long.valueOf(12345), enrollmentResource.getOfferOrderId());
-        // ... assert other fields as necessary
+        // Act & Assert
+        assertThrows(ServiceNotFoundException.class, () -> serviceRegistryLocator.getRabbitListenerEndpoint());
     }
+
+    @Test
+    public void getRabbitListenerEndpoint_ShouldThrowServiceRegistryException() {
+        // Arrange
+        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
+
+        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer))
+                .thenThrow(new ServiceRegistryException("Registry failure"));
+
+        // Act & Assert
+        assertThrows(ServiceRegistryException.class, () -> serviceRegistryLocator.getRabbitListenerEndpoint());
+    }
+
+    // ... other test cases as before
 }

@@ -1,32 +1,57 @@
-// ... other imports as before
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertNotNull;
+import static org.mockito.Mockito.*;
+
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 public class ArcataServiceRegistryLocatorImplTest {
-    // ... other setup code as before
 
-    @Test
-    public void getRabbitListenerEndpoint_ShouldThrowServiceNotFoundException() {
-        // Arrange
-        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
+    @Mock
+    private ArcataClient arcataClient;
 
-        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer))
-                .thenThrow(new ServiceNotFoundException("Service not found"));
+    @Mock
+    private ServiceRegistryConfigProperties properties;
 
-        // Act & Assert
-        assertThrows(ServiceNotFoundException.class, () -> serviceRegistryLocator.getRabbitListenerEndpoint());
+    @InjectMocks
+    private ArcataServiceRegistryLocatorImpl serviceRegistryLocator;
+
+    @Before
+    public void setUp() {
+        MockitoAnnotations.initMocks(this);
+        when(properties.getListenerServiceKey()).thenReturn("someServiceKey");
+        when(properties.getServiceInterface()).thenReturn("someServiceInterface");
+        when(properties.getListenerServicePort()).thenReturn("someServicePort");
     }
 
     @Test
-    public void getRabbitListenerEndpoint_ShouldThrowServiceRegistryException() {
+    public void getRabbitListenerEndpoint_ShouldReturnEndpoint() {
         // Arrange
+        Endpoint mockEndpoint = new Endpoint(); // Assuming Endpoint is a class you can instantiate
         ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
+        
+        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer)).thenReturn(mockEndpoint);
 
-        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer))
-                .thenThrow(new ServiceRegistryException("Registry failure"));
+        // Act
+        Endpoint endpoint = serviceRegistryLocator.getRabbitListenerEndpoint();
 
-        // Act & Assert
-        assertThrows(ServiceRegistryException.class, () -> serviceRegistryLocator.getRabbitListenerEndpoint());
+        // Assert
+        assertNotNull(endpoint);
+        verify(arcataClient).getEndpoint(serviceId, QoS.MessageConsumer);
     }
 
-    // ... other test cases as before
+    @Test(expected = ArcataRuntimeException.class)
+    public void getRabbitListenerEndpoint_ShouldThrowException_WhenEndpointIsNull() {
+        // Arrange
+        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
+        
+        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer)).thenReturn(null);
+
+        // Act
+        serviceRegistryLocator.getRabbitListenerEndpoint(); // This should throw the exception
+
+        // Assert is handled by the expected exception
+    }
 }

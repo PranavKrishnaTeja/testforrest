@@ -1,133 +1,73 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login Form</title>
-  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300&display=swap" rel="stylesheet">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: "Quicksand", sans-serif;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class MapperUtilTest {
+
+    private ObjectMapper objectMapper;
+    private MapperUtil mapperUtil;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        mapperUtil = new MapperUtil(objectMapper);
     }
-    body {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      background: #111;
-      width: 100%;
-      overflow: hidden;
+
+    @Test
+    void readValue_ShouldDeserializeObject() throws Exception {
+        TestClass originalObject = new TestClass("Test", 123);
+        TestClass deserializedObject = mapperUtil.readValue(originalObject, TestClass.class);
+
+        assertEquals(originalObject.getName(), deserializedObject.getName());
+        assertEquals(originalObject.getValue(), deserializedObject.getValue());
     }
-    .ring {
-      position: relative;
-      width: 500px;
-      height: 500px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+
+    @Test
+    void readValue_ShouldThrowRuntimeException_OnDeserializationFailure() {
+        String invalidContent = "invalid content";
+
+        assertThrows(RuntimeException.class, () -> mapperUtil.readValue(invalidContent, TestClass.class));
     }
-    .ring i {
-      position: absolute;
-      inset: 0;
-      border: 2px solid #fff;
-      transition: 0.5s;
+
+    @Test
+    void createAvroInstance_ShouldCreateNewInstance() throws Exception {
+        TestAvroClass instance = mapperUtil.createAvroInstance(TestAvroClass.class);
+
+        assertNotNull(instance);
     }
-    .ring i:nth-child(1) {
-      border-radius: 38% 62% 63% 37% / 41% 44% 56% 59%;
-      animation: animate 6s linear infinite;
+
+    @Test
+    void createAvroInstance_ShouldThrowRuntimeException_OnInstantiationFailure() {
+        assertThrows(RuntimeException.class, () -> mapperUtil.createAvroInstance(NonInstantiableClass.class));
     }
-    .ring i:nth-child(2) {
-      border-radius: 41% 44% 56% 59%/38% 62% 63% 37%;
-      animation: animate 4s linear infinite;
+
+    // Test classes
+    static class TestClass {
+        private String name;
+        private int value;
+
+        public TestClass(String name, int value) {
+            this.name = name;
+            this.value = value;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public int getValue() {
+            return value;
+        }
     }
-    .ring i:nth-child(3) {
-      border-radius: 41% 44% 56% 59%/38% 62% 63% 37%;
-      animation: animate2 10s linear infinite;
+
+    static class TestAvroClass {
+        // Assuming this is an Avro-generated class
     }
-    .ring:hover i {
-      border: 6px solid var(--clr);
-      filter: drop-shadow(0 0 20px var(--clr));
+
+    static class NonInstantiableClass {
+        private NonInstantiableClass() {
+            // Private constructor prevents instantiation
+        }
     }
-    @keyframes animate {
-      0% {
-        transform: rotate(0deg);
-      }
-      100% {
-        transform: rotate(360deg);
-      }
-    }
-    @keyframes animate2 {
-      0% {
-        transform: rotate(360deg);
-      }
-      100% {
-        transform: rotate(0deg);
-      }
-    }
-    .login {
-      position: absolute;
-      width: 300px;
-      height: 100%;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      gap: 20px;
-    }
-    .login h2 {
-      font-size: 2em;
-      color: #fff;
-    }
-    .login .inputBx {
-      position: relative;
-      width: 100%;
-    }
-    .login .inputBx input {
-      position: relative;
-      width: 100%;
-      padding: 12px 20px;
-      background: transparent;
-      border: 2px solid #fff;
-      border-radius: 40px;
-      font-size: 1.2em;
-      color: #fff;
-      box-shadow: none;
-      outline: none;
-    }
-    .login .inputBx input[type="submit"] {
-      width: 100%;
-      background: #0078ff;
-      background: linear-gradient(45deg, #ff357a, #fff172);
-      border: none;
-      cursor: pointer;
-    }
-    .login .inputBx input::placeholder {
-      color: rgba(255, 255, 255, 0.75);
-    }
-  </style>
-</head>
-<body>
-  <div class="ring">
-    <i></i>
-    <i></i>
-    <i></i>
-    <div class="login">
-      <h2>Login</h2>
-      <form action="your-server-endpoint" method="post">
-        <div class="inputBx">
-          <input type="text" name="username" placeholder="Username" required>
-        </div>
-        <div class="inputBx">
-          <input type="password" name="password" placeholder="Password" required>
-        </div>
-        <div class="inputBx">
-          <input type="submit" value="Login">
-        </div>
-      </form>
-    </div>
-  </div>
-</body>
-</html>
+}

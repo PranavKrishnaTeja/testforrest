@@ -1,1 +1,55 @@
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import static org.mockito.Mockito.*;
 
+class RabbitToKafkaPublisherServiceTest {
+
+    @Mock
+    private EventPayloadKafkaPublisher customerChangeKafkaPublisher;
+
+    @Mock
+    private ObjectMapper objectMapper;
+
+    @InjectMocks
+    private RabbitToKafkaPublisherService rabbitToKafkaPublisherService;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void publishModernizedEvent_ShouldPublishEvent_WhenEventCategoryIsCustomer() throws Exception {
+        // Arrange
+        Message message = new Message(); // Assuming Message is a class you have
+        message.setText("some text representing a ModernEvent");
+        
+        ModernizedEvent modernizedEvent = mock(ModernizedEvent.class); // Assuming ModernizedEvent is a class you have
+        
+        ModernEvent modernEvent = new ModernEvent(); // Assuming ModernEvent is a class you have
+        Event event = new Event(); // Assuming Event is a class you have
+        event.setPayloadData("some payload data");
+        event.setHeaderData(new HeaderData("CUSTOMER")); // Assuming HeaderData is a class with a copybookName field
+        modernEvent.setEvent(event);
+        
+        when(objectMapper.readValue(message.getText(), ModernEvent.class)).thenReturn(modernEvent);
+
+        EventPayload eventPayload = EventPayload.builder()
+                .payloadData("some payload data")
+                .headerData(new HeaderData("CUSTOMER"))
+                .build();
+
+        EventMapper eventMapper = EventMapper.fromCopybookName("CUSTOMER"); // Assuming EventMapper is a class you have
+
+        // Act
+        rabbitToKafkaPublisherService.publishModernizedEvent(message, modernizedEvent);
+
+        // Assert
+        verify(customerChangeKafkaPublisher).publishEvent(eventPayload, eventMapper);
+        verify(modernizedEvent, times(2)).log(anyString());
+    }
+}

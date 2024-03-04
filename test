@@ -1,1 +1,53 @@
-test
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+public class ArcataServiceRegistryLocatorTest {
+
+    @Test
+    public void testGetRabbitListenerEndpoint() throws ServiceNotFoundException, ServiceRegistryException {
+        // Create a mock implementation of the ArcataServiceRegistryLocator interface
+        ArcataServiceRegistryLocator mockLocator = Mockito.mock(ArcataServiceRegistryLocator.class);
+
+        // Create a mock Endpoint object
+        Endpoint mockEndpoint = Mockito.mock(Endpoint.class);
+
+        // Stub the getRabbitListenerEndpoint() method to return the mock Endpoint
+        when(mockLocator.getRabbitListenerEndpoint()).thenReturn(mockEndpoint);
+
+        // Call the method under test
+        Endpoint result = mockLocator.getRabbitListenerEndpoint();
+
+        // Verify that the method returns the expected result
+        assertNotNull(result);
+        assertEquals(mockEndpoint, result);
+
+        // Verify that the getRabbitListenerEndpoint() method was called exactly once
+        verify(mockLocator, times(1)).getRabbitListenerEndpoint();
+    }
+
+    @Test
+    public void testGetRabbitListenerEndpointThrowsServiceNotFoundException() throws ServiceNotFoundException, ServiceRegistryException {
+        // Create a mock implementation of the ArcataServiceRegistryLocator interface
+        ArcataServiceRegistryLocator mockLocator = Mockito.mock(ArcataServiceRegistryLocator.class);
+
+        // Stub the getRabbitListenerEndpoint() method to throw a ServiceNotFoundException
+        when(mockLocator.getRabbitListenerEndpoint()).thenThrow(new ServiceNotFoundException("Service not found"));
+
+        // Assert that the method throws the expected exception
+        assertThrows(ServiceNotFoundException.class, () -> mockLocator.getRabbitListenerEndpoint());
+    }
+
+    @Test
+    public void testGetRabbitListenerEndpointThrowsServiceRegistryException() throws ServiceNotFoundException, ServiceRegistryException {
+        // Create a mock implementation of the ArcataServiceRegistryLocator interface
+        ArcataServiceRegistryLocator mockLocator = Mockito.mock(ArcataServiceRegistryLocator.class);
+
+        // Stub the getRabbitListenerEndpoint() method to throw a ServiceRegistryException
+        when(mockLocator.getRabbitListenerEndpoint()).thenThrow(new ServiceRegistryException("Service registry error"));
+
+        // Assert that the method throws the expected exception
+        assertThrows(ServiceRegistryException.class, () -> mockLocator.getRabbitListenerEndpoint());
+    }
+}

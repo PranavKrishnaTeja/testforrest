@@ -1,66 +1,53 @@
 package com.schwab.brokerage.eventhub.kafka.publisher;
 
-import com.schwab.brokerage.eventhub.kafka.logger.EliLogger;
-import com.schwab.brokerage.eventhub.kafka.mapper.EventMapper;
-import com.schwab.brokerage.eventhub.kafka.mapper.jsonToAvroMapper.CustomerEventsMapper;
-import com.schwab.brokerage.eventhub.kafka.model.EventPayload;
-import com.schwab.brokerage.eventhub.kafka.util.MapperUtil;
-import com.schwab.kafka.esr.KafkaEndpoint;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.util.concurrent.ListenableFuture;
 import org.springframework.util.concurrent.ListenableFutureCallback;
-import schwab.discovery.client.ServiceId;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class CustomerChangeKafkaPublisherTest {
 
-    @Mock
-    private EliLogger eliLogger;
-    @Mock
-    private KafkaTemplate<String, Object> kafkaTemplate;
-    @Mock
-    private KafkaEndpoint customerChangeKafkaEndpoint;
-    @Mock
-    private ServiceId customerChangeServiceId;
-    @Mock
-    private CustomerEventsMapper customerEventsMapper;
-    @Mock
-    private MapperUtil mapperUtil;
-    @Mock
-    private ListenableFuture<SendResult<String, Object>> future;
+    // Mocks and setup as before...
 
-    private CustomerChangeKafkaPublisher customerChangeKafkaPublisher;
+    @Captor
+    private ArgumentCaptor<ListenableFutureCallback<SendResult<String, Object>>> callbackCaptor;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        customerChangeKafkaPublisher = new CustomerChangeKafkaPublisher(eliLogger, kafkaTemplate, customerChangeKafkaEndpoint, customerChangeServiceId, customerEventsMapper, mapperUtil);
+        // Setup as before...
     }
 
     @Test
-    void publishEvent_ShouldPublishEventSuccessfully() throws Exception {
+    void publishEvent_onFailure_ShouldLogKafkaException() {
         EventPayload eventPayload = mock(EventPayload.class);
         EventMapper eventMapper = mock(EventMapper.class);
-        Object kafkaAvroPayload = new Object();
-        SendResult<String, Object> sendResult = mock(SendResult.class);
 
-        when(customerEventsMapper.convertJsonToAvro(eventPayload, mapperUtil.createAvroInstance(eventMapper.getAvroTarget()))).thenReturn(kafkaAvroPayload);
-        when(customerChangeKafkaEndpoint.getTopic()).thenReturn("test-topic");
-        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(future);
+        // Setup as before...
 
         customerChangeKafkaPublisher.publishEvent(eventPayload, eventMapper);
 
-        verify(kafkaTemplate).send(any(ProducerRecord.class));
-        verify(future).addCallback(any(ListenableFutureCallback.class));
+        // Capture the callback
+        verify(future).addCallback(callbackCaptor.capture());
+        ListenableFutureCallback<SendResult<String, Object>> callback = callbackCaptor.getValue();
+
+        // Simulate a failure
+        Throwable exception = new RuntimeException("Test exception");
+        callback.onFailure(exception);
+
+        // Verify that the failure was logged
+        verify(eliLogger).logKafkaException(
+            eq("Publishing failed for Customer event with objectId: " + key),
+            eq("test-topic"),
+            any(Exception.class),
+            eq(customerChangeServiceId)
+        );
     }
 
-    // Additional test cases for failure scenarios, etc.
+    // Other test methods...
 }

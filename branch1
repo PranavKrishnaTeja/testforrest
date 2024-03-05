@@ -31,3 +31,16 @@ class MapperUtilTest {
         assertThrows(RuntimeException.class, () -> mapperUtil.readValue(invalidJson, Person.class));
     }
 }
+
+@Test
+void createAvroInstance_ShouldCreateNewInstance() throws Exception {
+    SomeAvroClass instance = mapperUtil.createAvroInstance(SomeAvroClass.class);
+
+    assertNotNull(instance);
+    // Additional assertions can be added based on the default state of SomeAvroClass
+}
+
+@Test
+void createAvroInstance_ShouldThrowRuntimeException_OnInstantiationFailure() {
+    assertThrows(RuntimeException.class, () -> mapperUtil.createAvroInstance(NonInstantiableClass.class));
+}

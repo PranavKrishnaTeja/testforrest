@@ -1,57 +1,48 @@
-import static org.junit.Assert.assertNotNull;
-import static org.mockito.Mockito.*;
+package com.schwab.brokerage.eventhub.kafka.mapper.jsonToAvroMapper;
 
-import org.junit.Before;
-import org.junit.Test;
-import org.mockito.InjectMocks;
+import com.schwab.brokerage.event.model.caev9av3.CustomerMerged;
+import com.schwab.brokerage.eventhub.kafka.model.EventPayload;
+import com.schwab.brokerage.eventhub.kafka.util.MapperUtil;
+import com.schwab.avro.brokerage.customer.events.CustomerMerge;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-public class ArcataServiceRegistryLocatorImplTest {
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.when;
+
+class CustomerMergeEventMapperTest {
 
     @Mock
-    private ArcataClient arcataClient;
+    private MapperUtil mapperUtil;
 
-    @Mock
-    private ServiceRegistryConfigProperties properties;
+    private CustomerMergeEventMapper customerMergeEventMapper;
 
-    @InjectMocks
-    private ArcataServiceRegistryLocatorImpl serviceRegistryLocator;
-
-    @Before
-    public void setUp() {
-        MockitoAnnotations.initMocks(this);
-        when(properties.getListenerServiceKey()).thenReturn("someServiceKey");
-        when(properties.getServiceInterface()).thenReturn("someServiceInterface");
-        when(properties.getListenerServicePort()).thenReturn("someServicePort");
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        customerMergeEventMapper = new CustomerMergeEventMapper(mapperUtil);
     }
 
     @Test
-    public void getRabbitListenerEndpoint_ShouldReturnEndpoint() {
-        // Arrange
-        Endpoint mockEndpoint = new Endpoint(); // Assuming Endpoint is a class you can instantiate
-        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
-        
-        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer)).thenReturn(mockEndpoint);
+    void convertJsonToAvro_ShouldConvertEventPayloadToCustomerMerge() {
+        EventPayload eventPayload = new EventPayload();
+        eventPayload.setPayloadData("{\"afterCustomerIdentifier\":123,\"beforeCustomerIdentifier\":456}");
 
-        // Act
-        Endpoint endpoint = serviceRegistryLocator.getRabbitListenerEndpoint();
+        CustomerMerged customerMerged = new CustomerMerged();
+        customerMerged.setAfterCustomerIdentifier(123L);
+        customerMerged.setBeforeCustomerIdentifier(456L);
 
-        // Assert
-        assertNotNull(endpoint);
-        verify(arcataClient).getEndpoint(serviceId, QoS.MessageConsumer);
+        when(mapperUtil.readValue(eventPayload.getPayloadData(), CustomerMerged.class)).thenReturn(customerMerged);
+
+        CustomerMerge customerMerge = new CustomerMerge();
+        Object result = customerMergeEventMapper.convertJsonToAvro(eventPayload, customerMerge);
+
+        assertEquals(customerMerge, result);
+        assertEquals(123, customerMerge.getAfterCustomerId());
+        assertEquals(456, customerMerge.getBeforeCustomerId());
     }
 
-    @Test(expected = ArcataRuntimeException.class)
-    public void getRabbitListenerEndpoint_ShouldThrowException_WhenEndpointIsNull() {
-        // Arrange
-        ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(), properties.getServiceInterface(), properties.getListenerServicePort());
-        
-        when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer)).thenReturn(null);
-
-        // Act
-        serviceRegistryLocator.getRabbitListenerEndpoint(); // This should throw the exception
-
-        // Assert is handled by the expected exception
-    }
+    // Additional test cases...
 }

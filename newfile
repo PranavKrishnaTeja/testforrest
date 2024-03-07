@@ -1,85 +1,67 @@
-package com.schwab.brokerage.eventhub.kafka.logger;
-
-import com.schwab.brokerage.eventhub.kafka.config.LogMessageConfiguration;
-import com.schwab.kafka.logging.KafkaELILogRecord;
-import com.schwab.kafka.logging.KafkaLogUtil;
-import org.apache.kafka.clients.producer.RecordMetadata;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Envelope;
+import com.schwab.brokerage.eventhub.kafka.exception.RejectMessageFailedException;
+import com.schwab.brokerage.feature.catelilogging.manual.LevelLogEntryBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import schwab.discovery.client.ServiceId;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-class LogRecordGeneratorImplTest {
+class ModernizedEventTest {
 
     @Mock
-    private LogMessageConfiguration logMsgConfig;
+    private Channel channel;
     @Mock
-    private KafkaLogUtil kafkaLogUtil;
+    private Envelope envelope;
     @Mock
-    private RecordMetadata recordMetadata;
-    @Mock
-    private ServiceId serviceId;
+    private LevelLogEntryBuilder levelLogEntryBuilder;
 
-    private LogRecordGeneratorImpl logRecordGenerator;
+    private ModernizedEvent modernizedEvent;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        logRecordGenerator = new LogRecordGeneratorImpl(logMsgConfig, kafkaLogUtil);
+        modernizedEvent = new ModernizedEvent(channel, envelope, levelLogEntryBuilder);
     }
 
     @Test
-    void create_ShouldReturnLogRecord_ForSimpleMessage() {
-        String msg = "Test message";
-        ServiceCallType callType = ServiceCallType.MESSAGING;
-        String operation = "Test operation";
+    void nack_ShouldRejectMessageAndLogException() throws Exception {
+        long deliveryTag = 123L;
+        Throwable throwable = new InvalidMessageException("Invalid message");
 
-        LogRecord logRecord = logRecordGenerator.create(msg, callType, operation);
+        when(envelope.getDeliveryTag()).thenReturn(deliveryTag);
 
-        assertNotNull(logRecord);
-        // Additional assertions based on the expected LogRecord content
+        modernizedEvent.nack(throwable);
+
+        verify(channel).basicReject(deliveryTag, false);
+        verify(levelLogEntryBuilder).withException(throwable, 627);
+        verify(levelLogEntryBuilder).getMutableLogRecord().getResults().setTraceLevel(ResultsTraceLevel.WARNING);
     }
 
     @Test
-    void create_ShouldReturnLogRecord_ForExceptionMessage() {
-        String msg = "Test message";
-        ServiceCallType callType = ServiceCallType.MESSAGING;
-        String operation = "Test operation";
-        Exception exception = new Exception("Test exception");
+    void nack_ShouldLogErrorIfRejectFails() throws Exception {
+        long deliveryTag = 123L;
+        Throwable throwable = new InvalidMessageException("Invalid message");
+        Exception rejectException = new Exception("Reject failed");
 
-        LogRecord logRecord = logRecordGenerator.create(msg, callType, operation, exception);
+        when(envelope.getDeliveryTag()).thenReturn(deliveryTag);
+        doThrow(rejectException).when(channel).basicReject(deliveryTag, false);
 
-        assertNotNull(logRecord);
-        // Additional assertions based on the expected LogRecord content
+        modernizedEvent.nack(throwable);
+
+        verify(levelLogEntryBuilder).withException(argThat(ex -> ex.getCause() == rejectException), eq(617));
+        verify(levelLogEntryBuilder).getMutableLogRecord().getResults().setTraceLevel(ResultsTraceLevel.ERROR);
     }
 
     @Test
-    void create_ShouldReturnLogRecord_ForKafkaMessage() {
-        String summary = "Test summary";
-        String producerRecord = "Test producer record";
-        when(recordMetadata.topic()).thenReturn("Test topic");
+    void log_ShouldLogMessage() {
+        String message = "Test message";
 
-        LogRecord logRecord = logRecordGenerator.create(summary, recordMetadata, producerRecord, serviceId);
+        modernizedEvent.log(message);
 
-        assertNotNull(logRecord);
-        // Additional assertions based on the expected LogRecord content
+        verify(levelLogEntryBuilder).withMessage(message);
     }
-
-    @Test
-    void create_ShouldReturnLogRecord_ForKafkaException() {
-        String summary = "Test summary";
-        String topicName = "Test topic";
-        Exception exception = new Exception("Test exception");
-
-        LogRecord logRecord = logRecordGenerator.create(summary, topicName, exception, serviceId);
-
-        assertNotNull(logRecord);
-        // Additional assertions based on the expected LogRecord content
-    }
-
-    // Additional test cases...
 }

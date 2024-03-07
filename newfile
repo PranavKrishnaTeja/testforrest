@@ -1,47 +1,85 @@
 package com.schwab.brokerage.eventhub.kafka.logger;
 
-import org.junit.jupiter.api.AfterEach;
+import com.schwab.brokerage.eventhub.kafka.config.LogMessageConfiguration;
+import com.schwab.kafka.logging.KafkaELILogRecord;
+import com.schwab.kafka.logging.KafkaLogUtil;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import schwab.discovery.client.ServiceId;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.when;
 
-class DataHolderTest {
+class LogRecordGeneratorImplTest {
 
-    @AfterEach
-    void tearDown() {
-        DataHolder.clear();
+    @Mock
+    private LogMessageConfiguration logMsgConfig;
+    @Mock
+    private KafkaLogUtil kafkaLogUtil;
+    @Mock
+    private RecordMetadata recordMetadata;
+    @Mock
+    private ServiceId serviceId;
+
+    private LogRecordGeneratorImpl logRecordGenerator;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        logRecordGenerator = new LogRecordGeneratorImpl(logMsgConfig, kafkaLogUtil);
     }
 
     @Test
-    void addDataForAndReadDataFor_ShouldStoreAndRetrieveData() {
-        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
-        String value = "testValue";
+    void create_ShouldReturnLogRecord_ForSimpleMessage() {
+        String msg = "Test message";
+        ServiceCallType callType = ServiceCallType.MESSAGING;
+        String operation = "Test operation";
 
-        DataHolder.addDataFor(key, value);
-        Object retrievedValue = DataHolder.readDataFor(key);
+        LogRecord logRecord = logRecordGenerator.create(msg, callType, operation);
 
-        assertEquals(value, retrievedValue);
+        assertNotNull(logRecord);
+        // Additional assertions based on the expected LogRecord content
     }
 
     @Test
-    void readDataFor_ShouldReturnNull_WhenKeyIsNotPresent() {
-        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
+    void create_ShouldReturnLogRecord_ForExceptionMessage() {
+        String msg = "Test message";
+        ServiceCallType callType = ServiceCallType.MESSAGING;
+        String operation = "Test operation";
+        Exception exception = new Exception("Test exception");
 
-        Object retrievedValue = DataHolder.readDataFor(key);
+        LogRecord logRecord = logRecordGenerator.create(msg, callType, operation, exception);
 
-        assertNull(retrievedValue);
+        assertNotNull(logRecord);
+        // Additional assertions based on the expected LogRecord content
     }
 
     @Test
-    void clear_ShouldRemoveAllData() {
-        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
-        String value = "testValue";
+    void create_ShouldReturnLogRecord_ForKafkaMessage() {
+        String summary = "Test summary";
+        String producerRecord = "Test producer record";
+        when(recordMetadata.topic()).thenReturn("Test topic");
 
-        DataHolder.addDataFor(key, value);
-        DataHolder.clear();
-        Object retrievedValue = DataHolder.readDataFor(key);
+        LogRecord logRecord = logRecordGenerator.create(summary, recordMetadata, producerRecord, serviceId);
 
-        assertNull(retrievedValue);
+        assertNotNull(logRecord);
+        // Additional assertions based on the expected LogRecord content
     }
+
+    @Test
+    void create_ShouldReturnLogRecord_ForKafkaException() {
+        String summary = "Test summary";
+        String topicName = "Test topic";
+        Exception exception = new Exception("Test exception");
+
+        LogRecord logRecord = logRecordGenerator.create(summary, topicName, exception, serviceId);
+
+        assertNotNull(logRecord);
+        // Additional assertions based on the expected LogRecord content
+    }
+
+    // Additional test cases...
 }

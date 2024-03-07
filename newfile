@@ -1,0 +1,47 @@
+package com.schwab.brokerage.eventhub.kafka.logger;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+class DataHolderTest {
+
+    @AfterEach
+    void tearDown() {
+        DataHolder.clear();
+    }
+
+    @Test
+    void addDataForAndReadDataFor_ShouldStoreAndRetrieveData() {
+        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
+        String value = "testValue";
+
+        DataHolder.addDataFor(key, value);
+        Object retrievedValue = DataHolder.readDataFor(key);
+
+        assertEquals(value, retrievedValue);
+    }
+
+    @Test
+    void readDataFor_ShouldReturnNull_WhenKeyIsNotPresent() {
+        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
+
+        Object retrievedValue = DataHolder.readDataFor(key);
+
+        assertNull(retrievedValue);
+    }
+
+    @Test
+    void clear_ShouldRemoveAllData() {
+        LogRecordGenerator.DataKey key = LogRecordGenerator.DataKey.REQUEST_ID;
+        String value = "testValue";
+
+        DataHolder.addDataFor(key, value);
+        DataHolder.clear();
+        Object retrievedValue = DataHolder.readDataFor(key);
+
+        assertNull(retrievedValue);
+    }
+}

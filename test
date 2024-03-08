@@ -1,12 +1,9 @@
 @Test
-public void getRabbitListenerEndpoint_ShouldReturnEndpoint_WhenEndpointIsNotNull() {
-    ServiceId serviceId = new ServiceId(properties.getListenerServiceKey(),
-                                        properties.getServiceInterface(),
-                                        properties.getListenerServicePort());
-    Endpoint expectedEndpoint = new Endpoint(); // Assuming Endpoint is a class you have
-    when(arcataClient.getEndpoint(serviceId, QoS.MessageConsumer)).thenReturn(expectedEndpoint);
+void publishEvent_ShouldThrowKafkaPublishRuntimeException_OnExecutionException() throws Exception {
+    String modernEventString = TestUtil.readFixture("modern_event_sample_data.json");
+    when(message.getText()).thenReturn(modernEventString);
+    when(objectMapper.readValue(message.getText(), ModernEvent.class))
+            .thenThrow(new IOException(new ExecutionException(new Exception())));
 
-    Endpoint actualEndpoint = serviceRegistryLocator.getRabbitListenerEndpoint();
-
-    assertEquals(expectedEndpoint, actualEndpoint);
+    assertThrows(KafkaPublishRuntimeException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
 }

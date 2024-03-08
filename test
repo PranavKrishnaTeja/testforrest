@@ -63,3 +63,8 @@ void publishEvent_ShouldThrowKafkaPublishRuntimeException_OnExecutionException()
 
     assertThrows(KafkaPublishRuntimeException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
 }
+
+
+This is how I have done the test method and i am getting null pointer and i do not know why
+
+String modernEventString = TestUtil.readFixture("modern_event_sample_data.json"); ModernEvent modernEvent = objectMapper.readValue(modernEventString, ModernEvent.class); when(message.getText()).thenReturn(modernEventString); EventPayload eventPayload = EventPayload.builder().payloadData(modernEvent.getEvent().getPayloadData()).headerData(modernEvent.getEvent().getHeaderData()).build(); EventMapper eventMapper = EventMapper.fromCopybookName("CAEV9AV3"); rabbitToKafkaPublisherService.publishEvent(message);

@@ -1,47 +1,65 @@
-package com.schwab.brokerage.eventhub.kafka.mapper.jsonToAvroMapper;
-
-import com.schwab.brokerage.event.model.caev9av3.CustomerMerged;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schwab.brokerage.eventhub.kafka.mapper.EventMapper;
 import com.schwab.brokerage.eventhub.kafka.model.EventPayload;
-import com.schwab.brokerage.eventhub.kafka.util.MapperUtil;
-import com.schwab.avro.brokerage.customer.events.CustomerMerge;
+import com.schwab.brokerage.eventhub.kafka.publisher.EventPayloadKafkaPublisher;
+import com.schwab.brokerage.eventhub.kafka.service.RabbitToKafkaPublisherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import schwab.messaging.client.rabbitmq.Message;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
+import java.io.IOException;
+import java.util.concurrent.ExecutionException;
 
-class CustomerMergeEventMapperTest {
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+class RabbitToKafkaPublisherServiceTest {
 
     @Mock
-    private MapperUtil mapperUtil;
+    private EventPayloadKafkaPublisher customerChangeKafkaPublisher;
+    @Mock
+    private ObjectMapper objectMapper;
+    @Mock
+    private Message message;
 
-    private CustomerMergeEventMapper customerMergeEventMapper;
+    private RabbitToKafkaPublisherService rabbitToKafkaPublisherService;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        customerMergeEventMapper = new CustomerMergeEventMapper(mapperUtil);
+        rabbitToKafkaPublisherService = new RabbitToKafkaPublisherService(customerChangeKafkaPublisher, objectMapper);
     }
 
     @Test
-    void convertJsonToAvro_ShouldConvertEventPayloadToCustomerMerge() {
-        EventPayload eventPayload = new EventPayload();
-        eventPayload.setPayloadData("{\"afterCustomerIdentifier\":123,\"beforeCustomerIdentifier\":456}");
+    void publishEvent_ShouldPublishCustomerChangeEvent() throws Exception {
+        ModernEvent modernEvent = new ModernEvent();
+        modernEvent.setEvent(new Event()); // Assuming Event is a class you have
+        modernEvent.getEvent().setHeaderData(new HeaderData("CUSTOMER_COPYBOOK_NAME")); // Assuming HeaderData is a class you have
 
-        CustomerMerged customerMerged = new CustomerMerged();
-        customerMerged.setAfterCustomerIdentifier(123L);
-        customerMerged.setBeforeCustomerIdentifier(456L);
+        when(message.getText()).thenReturn("message text");
+        when(objectMapper.readValue(message.getText(), ModernEvent.class)).thenReturn(modernEvent);
 
-        when(mapperUtil.readValue(eventPayload.getPayloadData(), CustomerMerged.class)).thenReturn(customerMerged);
+        rabbitToKafkaPublisherService.publishEvent(message);
 
-        CustomerMerge customerMerge = new CustomerMerge();
-        Object result = customerMergeEventMapper.convertJsonToAvro(eventPayload, customerMerge);
+        verify(customerChangeKafkaPublisher).publishEvent(any(EventPayload.class), any(EventMapper.class));
+    }
 
-        assertEquals(customerMerge, result);
-        assertEquals(123, customerMerge.getAfterCustomerId());
-        assertEquals(456, customerMerge.getBeforeCustomerId());
+    @Test
+    void publishEvent_ShouldThrowInvalidMessageException_OnIOException() throws Exception {
+        when(message.getText()).thenReturn("message text");
+        when(objectMapper.readValue(message.getText(), ModernEvent.class)).thenThrow(new IOException());
+
+        assertThrows(InvalidMessageException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
+    }
+
+    @Test
+    void publishEvent_ShouldThrowKafkaPublishRuntimeException_OnExecutionException() throws Exception {
+        when(message.getText()).thenReturn("message text");
+        when(objectMapper.readValue(message.getText(), ModernEvent.class)).thenThrow(new ExecutionException(new Exception()));
+
+        assertThrows(KafkaPublishRuntimeException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
     }
 
     // Additional test cases...

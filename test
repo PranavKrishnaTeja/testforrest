@@ -1,9 +1,22 @@
-@Test
+/*@Test
 void publishEvent_ShouldThrowKafkaPublishRuntimeException_OnExecutionException() throws Exception {
     String modernEventString = TestUtil.readFixture("modern_event_sample_data.json");
     when(message.getText()).thenReturn(modernEventString);
     when(objectMapper.readValue(message.getText(), ModernEvent.class))
             .thenThrow(new IOException(new ExecutionException(new Exception())));
+
+    assertThrows(KafkaPublishRuntimeException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
+}*/
+
+@Test
+void publishEvent_ShouldThrowKafkaPublishRuntimeException_OnExecutionException() throws Exception {
+    String modernEventString = TestUtil.readFixture("modern_event_sample_data.json");
+    ModernEvent modernEvent = objectMapper.readValue(modernEventString, ModernEvent.class);
+
+    when(message.getText()).thenReturn(modernEventString);
+    when(objectMapper.readValue(message.getText(), ModernEvent.class)).thenReturn(modernEvent);
+    when(customerChangeKafkaPublisher.publishEvent(any(EventPayload.class), any(EventMapper.class)))
+            .thenThrow(new ExecutionException(new Exception()));
 
     assertThrows(KafkaPublishRuntimeException.class, () -> rabbitToKafkaPublisherService.publishEvent(message));
 }

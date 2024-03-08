@@ -1,15 +1,25 @@
 @Test
-    void onFailure_ShouldLogKafkaException() {
-        Throwable exception = new RuntimeException("Test exception");
-        String expectedTopic = "Test topic";
-        String expectedKey = "Test key";
+void onFailure_ShouldLogKafkaException() throws Exception {
+    String modernEventString = TestUtil.readFixture("modern_event_sample_data.json");
+    ModernEvent modernEvent = objectMapper.readValue(modernEventString, ModernEvent.class);
+    EventPayload eventPayload = EventPayload.builder()
+                                            .payloadData(modernEvent.getEvent().getPayloadData())
+                                            .headerData(modernEvent.getEvent().getHeaderData())
+                                            .build();
+    EventMapper eventMapper = EventMapper.fromCopybookName("CAEV9AV3");
+    Object kafkaAvroPayload = CustomerMerge.newBuilder().build();
+    String expectedTopic = "test-topic";
 
-        when(customerChangeKafkaEndpoint.getTopic()).thenReturn(expectedTopic);
-        SettableListenableFuture<SendResult<String, Object>> future = new SettableListenableFuture<>();
-        future.setException(exception);
+    when(customerEventsMapper.convertJsonToAvro(eventPayload, mapperUtil.createAvroInstance(eventMapper.getAvroTarget())))
+            .thenReturn(kafkaAvroPayload);
+    when(customerChangeKafkaEndpoint.getTopic()).thenReturn(expectedTopic);
+    SettableListenableFuture<SendResult<String, Object>> future = new SettableListenableFuture<>();
+    Throwable exception = new RuntimeException("Test exception");
+    future.setException(exception);
+    when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(future);
 
-        // Trigger the onFailure callback
-        future.addCallback(customerChangeKafkaPublisher.getCallback(expectedKey));
+    customerChangeKafkaPublisher.publishEvent(eventPayload, eventMapper);
 
-        verify(eliLogger).logKafkaException("Publishing failed for Customer event with objectId: " + expectedKey, expectedTopic, new Exception(exception), /* serviceId */);
-    }
+    verify(eliLogger).logKafkaException("Publishing failed for Customer event with objectId: " + eventMapper.getObjectIdentifier(),
+                                        expectedTopic, new Exception(exception), customerChangeServiceId);
+}

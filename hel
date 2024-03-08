@@ -1,23 +1,15 @@
-CertificateCredentials credentials = new CertificateCredentials() {
-        @Override
-        public byte[] getKeyStoreBytes() {
-            return keyStoreBytes;
-        }
+@Test
+    void onFailure_ShouldLogKafkaException() {
+        Throwable exception = new RuntimeException("Test exception");
+        String expectedTopic = "Test topic";
+        String expectedKey = "Test key";
 
-        @Override
-        public String getFilename() {
-            return keyStorePath; // Return the filename or null if not needed
-        }
+        when(customerChangeKafkaEndpoint.getTopic()).thenReturn(expectedTopic);
+        SettableListenableFuture<SendResult<String, Object>> future = new SettableListenableFuture<>();
+        future.setException(exception);
 
-        @Override
-        public String getPassword() {
-            return keyStorePassword;
-        }
-    };
+        // Trigger the onFailure callback
+        future.addCallback(customerChangeKafkaPublisher.getCallback(expectedKey));
 
-    // Build the Messenger with CertificateCredentials
-    return new Messenger.Builder()
-            .credentials(credentials)
-            .appId(properties.getAppId())
-            .build();
-}
+        verify(eliLogger).logKafkaException("Publishing failed for Customer event with objectId: " + expectedKey, expectedTopic, new Exception(exception), /* serviceId */);
+    }

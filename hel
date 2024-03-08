@@ -1,0 +1,23 @@
+CertificateCredentials credentials = new CertificateCredentials() {
+        @Override
+        public byte[] getKeyStoreBytes() {
+            return keyStoreBytes;
+        }
+
+        @Override
+        public String getFilename() {
+            return keyStorePath; // Return the filename or null if not needed
+        }
+
+        @Override
+        public String getPassword() {
+            return keyStorePassword;
+        }
+    };
+
+    // Build the Messenger with CertificateCredentials
+    return new Messenger.Builder()
+            .credentials(credentials)
+            .appId(properties.getAppId())
+            .build();
+}

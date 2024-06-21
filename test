@@ -1,72 +1,100 @@
-package com.schwab.brokerage.eventhub.rabbit.handler;
+package com.schwab.brokerage.eventhub.rabbit.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rabbitmq.client.AMQP;
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Envelope;
-import com.schwab.brokerage.eventhub.rabbit.connector.RabbitMqConnector;
-import com.schwab.brokerage.eventhub.rabbit.logger.LogMessageDetails;
+import com.schwab.brokerage.event.parse.service.EventCopybookService;
+import com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties;
+import com.schwab.brokerage.eventhub.rabbit.handler.ModernizedEvent;
 import com.schwab.brokerage.eventhub.rabbit.logger.PubHubLogger;
-import com.schwab.brokerage.eventhub.rabbit.service.RabbitPublisherService;
-import lombok.AllArgsConstructor;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
-import schwab.discovery.health.AvailabilityReport;
+import com.schwab.brokerage.eventhub.rabbit.validation.ModernEventValidator;
+import com.schwab.brokerage.eventhub.utilities.model.ModernEvent;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.MockitoJUnitRunner;
 import schwab.messaging.client.InvalidMessageException;
 import schwab.messaging.client.rabbitmq.Message;
-import schwab.messaging.client.rabbitmq.MessageHandler;
-import schwab.rrbus.ServiceContext;
 
-import java.util.List;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
-@Component
-@AllArgsConstructor
-public class BatchMessageHandler extends MessageHandler {
+import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.Target;
+import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.TargetType;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.OBJECT_ID;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_CLIENT_CORREL_ID;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_COPYBOOK_NAME;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_DESTINATION_NAME;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
-    private final PubHubLogger pubHubLogger;
-    private final RabbitPublisherService rabbitPublisherService;
-    private final RabbitMqConnector rabbitMqConnector;
+@RunWith(MockitoJUnitRunner.class)
+public class RabbitPublisherServiceTest {
 
-    @SuppressWarnings("squid:S1181")
-    public void handleDelivery(Channel channel, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
-        ReceivedMessage message = null;
+    private final ModernizedEvent modernizedEvent = new ModernizedEvent();
+    
+    ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule()); // Need Time Module to parse fixture
+    Map<String, Object> headers = new HashMap<>();
+    Map<String, String> headersString = new HashMap<>();
 
-        LogMessageDetails logMessageDetails = LogMessageDetails.builder().operation("handleDelivery").build();
-        ModernizedEvent modernizedEvent = new ModernizedEvent(channel, envelope, logMessageDetails, pubHubLogger);
-        try {
-            message = receiveMessageFromContext(envelope, properties, body);
-            modernizedEvent.setCorrelationId(message.getCorrelationId());
-            pubHubLogger.updateLogDetailsFromMessage(logMessageDetails, message, envelope.isRedeliver());
+    @Mock
+    EventCopybookService eventCopybookService;
+    @Mock
+    MainframeEvent mainframeEvent;
+    @Mock
+    Message message;
+    @Mock
+    AMQP.BasicProperties basicProperties;
+    @Mock
+    ModernEventValidator modernEventValidator;
+    @Mock
+    PubHubLogger pubHubLogger;
+    RabbitPublisherService rabbitPublisherService;
 
-            if (!StringUtils.hasText(message.getText())) throw new InvalidMessageException("message text is empty");
-
-            List<ModernEvent> modernEvents = rabbitPublisherService.buildModernizedEvents(message, modernizedEvent);
-            for (ModernEvent event : modernEvents) {
-                rabbitMqConnector.queueMessage(modernizedEvent);
-            }
-
-        } catch (Throwable t) { // exceptions at this point can only be caused by invalid data
-            pubHubLogger.addMessagetoSecureLog(message, modernizedEvent);
-            modernizedEvent.nack(t);
-        } finally {
-            ServiceContext.clear(); // from Vals code do not remove
-        }
+    @Before
+    public void setup() {
+        rabbitPublisherService = new RabbitPublisherService(eventCopybookService, new RabbitRoutingConfigProperties(), modernEventValidator, objectMapper);
+        headers.put(OBJECT_ID, "12345");
+        headersString.put(OBJECT_ID, "12345");
+        headers.put(PUBHUB_COPYBOOK_NAME, "CAEV62V3");
+        headersString.put(PUBHUB_COPYBOOK_NAME, "CAEV62V3");
+        headers.put(PUBHUB_CLIENT_CORREL_ID, "1234");
+        headersString.put(PUBHUB_CLIENT_CORREL_ID, "1234");
+        Mockito.when(message.getProperties()).thenReturn(basicProperties);
+        Mockito.when(basicProperties.getHeaders()).thenReturn(headers);
+        modernizedEvent.setPubHubLogger(pubHubLogger);
+        final Target target = new Target();
+        target.setTarget(TargetType.MF2DIST);
+        target.setEnabled(true);
+        target.setRoutingKey("routing.key");
+        Mockito.when(modernEventValidator.validateDestination(any(), any())).thenReturn(target);
     }
 
-    @Override
-    public AvailabilityReport checkHealth() {
-        return new AvailabilityReport();
+    @Test
+    public void testBuildModernizedEventWithoutOverride() throws IOException, InvalidMessageException {
+        String jsonMessage = "{\"event\": {\"headerData\": {\"publishServiceInformation\": {\"objectIdentifier\": \"12345\"}, \"copybookName\": \"CAEV62V3\"}, \"payloadData\": \"{}\"}}";
+        Mockito.when(message.getText()).thenReturn(jsonMessage);
+
+        ModernEvent result = rabbitPublisherService.buildModernizedEvent(message, modernizedEvent);
+
+        assertThat(result.getEvent().getHeaderData().getEventName()).isEqualTo("routing.key");
+        assertThat(modernizedEvent.getRoutingKey()).isEqualTo("routing.key");
+        assertThat(modernizedEvent.getHeaders().get(PUBHUB_DESTINATION_NAME)).isEqualTo("routing.key");
     }
 
-    ReceivedMessage receiveMessageFromContext(Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws InvalidMessageException {
-        try {
-            Message.initServiceContext(properties); // from Vals code do not remove
-            return new ReceivedMessage(properties, body, envelope.getRoutingKey());
-        } catch (Exception e) {
-            throw new InvalidMessageException(e);
-        }
-    }
+    @Test
+    public void testBuildModernizedEventWithOverride() throws IOException, InvalidMessageException {
+        headers.put("PubHub-Replay-Consumer-Override", "testOverride");
+        String jsonMessage = "{\"event\": {\"headerData\": {\"publishServiceInformation\": {\"objectIdentifier\": \"12345\"}, \"copybookName\": \"CAEV62V3\"}, \"payloadData\": \"{}\"}}";
+        Mockito.when(message.getText()).thenReturn(jsonMessage);
 
-    public Acknowledgement getAcknowledgement() {
-        return Acknowledgement.Manual;
+        ModernEvent result = rabbitPublisherService.buildModernizedEvent(message, modernizedEvent);
+
+        assertThat(result.getEvent().getHeaderData().getEventName()).isEqualTo("routing.key.testoverride");
+        assertThat(modernizedEvent.getRoutingKey()).isEqualTo("routing.key.testoverride");
+        assertThat(modernizedEvent.getHeaders().get(PUBHUB_DESTINATION_NAME)).isEqualTo("routing.key.testoverride");
     }
 }

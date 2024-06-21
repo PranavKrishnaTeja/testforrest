@@ -1,125 +1,72 @@
-package com.schwab.brokerage.eventhub.rabbit.service;
+package com.schwab.brokerage.eventhub.rabbit.handler;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.schwab.brokerage.event.parse.service.EventCopybookService;
-import com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties;
-import com.schwab.brokerage.eventhub.rabbit.handler.ModernizedEvent;
-import com.schwab.brokerage.eventhub.rabbit.model.EventPayload;
-import com.schwab.brokerage.eventhub.rabbit.validation.ModernEventValidator;
-import com.schwab.brokerage.eventhub.utilities.model.ModernEvent;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Envelope;
+import com.schwab.brokerage.eventhub.rabbit.connector.RabbitMqConnector;
+import com.schwab.brokerage.eventhub.rabbit.logger.LogMessageDetails;
+import com.schwab.brokerage.eventhub.rabbit.logger.PubHubLogger;
+import com.schwab.brokerage.eventhub.rabbit.service.RabbitPublisherService;
+import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import schwab.discovery.health.AvailabilityReport;
 import schwab.messaging.client.InvalidMessageException;
 import schwab.messaging.client.rabbitmq.Message;
+import schwab.messaging.client.rabbitmq.MessageHandler;
+import schwab.rrbus.ServiceContext;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-
-import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.Target;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.OBJECT_ID;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_COPYBOOK_NAME;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_DESTINATION_NAME;
 
 @Component
-public class RabbitPublisherService {
+@AllArgsConstructor
+public class BatchMessageHandler extends MessageHandler {
 
-    private final EventCopybookService eventCopybookService;
-    private final ObjectMapper objectMapper;
-    private final Map<String, Target> eventDestinations;
-    private final ModernEventValidator modernEventValidator;
+    private final PubHubLogger pubHubLogger;
+    private final RabbitPublisherService rabbitPublisherService;
+    private final RabbitMqConnector rabbitMqConnector;
 
-    @Autowired
-    public RabbitPublisherService(
-            EventCopybookService eventCopybookService,
-            RabbitRoutingConfigProperties properties,
-            ModernEventValidator modernEventValidator,
-            ObjectMapper objectMapper) {
-        this.eventCopybookService = eventCopybookService;
-        this.objectMapper = objectMapper;
-        this.eventDestinations = properties.getEventDestinations();
-        this.modernEventValidator = modernEventValidator;
-    }
+    @SuppressWarnings("squid:S1181")
+    public void handleDelivery(Channel channel, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
+        ReceivedMessage message = null;
 
-    public List<ModernEvent> buildModernizedEvents(Message message, ModernizedEvent modernizedEvent) throws IOException, InvalidMessageException {
-        // Build and Validate the ModernEvent
-        ModernEvent modernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
-        modernEventValidator.validateEvent(modernEvent);
-        modernizedEvent.log("Built Modern Event");
+        LogMessageDetails logMessageDetails = LogMessageDetails.builder().operation("handleDelivery").build();
+        ModernizedEvent modernizedEvent = new ModernizedEvent(channel, envelope, logMessageDetails, pubHubLogger);
+        try {
+            message = receiveMessageFromContext(envelope, properties, body);
+            modernizedEvent.setCorrelationId(message.getCorrelationId());
+            pubHubLogger.updateLogDetailsFromMessage(logMessageDetails, message, envelope.isRedeliver());
 
-        // Build and Validate the Headers
-        Map<String, String> headers = new HashMap<>();
-        message.getProperties().getHeaders().forEach((k, v) -> headers.put(k, Objects.toString(v, null)));
-        final Target target = modernEventValidator.validateDestination(eventDestinations, headers);
-        String routingKey = target.getRoutingKey();
+            if (!StringUtils.hasText(message.getText())) throw new InvalidMessageException("message text is empty");
 
-        // Check for PubHub-Replay-Consumer-override header
-        String overrideHeader = headers.get("PubHub-Replay-Consumer-override");
-        List<ModernEvent> modernEvents = new ArrayList<>();
-
-        if (overrideHeader != null && !overrideHeader.isEmpty()) {
-            String[] overrideValues = overrideHeader.split(",");
-            for (String overrideValue : overrideValues) {
-                String updatedRoutingKey = routingKey + "." + overrideValue.trim().toLowerCase();
-
-                headers.put(OBJECT_ID, String.valueOf(modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier()));
-                headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
-                headers.put(PUBHUB_DESTINATION_NAME, updatedRoutingKey);
-                modernizedEvent.log("Built Headers with override: " + overrideValue.trim().toLowerCase());
-
-                // Update the Modernized Event for this override value
-                ModernEvent clonedEvent = objectMapper.readValue(objectMapper.writeValueAsString(modernEvent), ModernEvent.class);
-                clonedEvent.getEvent().getHeaderData().setEventName(updatedRoutingKey);
-
-                String eventPayloadJson = generateEventPayloadJson(clonedEvent);
-                modernizedEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
-                modernizedEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernizedEvent.getJson()).addExtendedFields(headers);
-
-                modernEvents.add(clonedEvent);
+            List<ModernEvent> modernEvents = rabbitPublisherService.buildModernizedEvents(message, modernizedEvent);
+            for (ModernEvent event : modernEvents) {
+                rabbitMqConnector.queueMessage(modernizedEvent);
             }
-        } else {
-            // No override header, process normally
-            headers.put(OBJECT_ID, String.valueOf(modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier()));
-            headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
-            headers.put(PUBHUB_DESTINATION_NAME, routingKey);
-            modernizedEvent.log("Built Headers without override");
 
-            modernEvent.getEvent().getHeaderData().setEventName(routingKey);
-
-            String eventPayloadJson = generateEventPayloadJson(modernEvent);
-            modernizedEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
-            modernizedEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernizedEvent.getJson()).addExtendedFields(headers);
-
-            modernEvents.add(modernEvent);
+        } catch (Throwable t) { // exceptions at this point can only be caused by invalid data
+            pubHubLogger.addMessagetoSecureLog(message, modernizedEvent);
+            modernizedEvent.nack(t);
+        } finally {
+            ServiceContext.clear(); // from Vals code do not remove
         }
-
-        return modernEvents;
     }
 
-    String generateMf2DistTemplateJson(String eventPayloadJson, Map<String, String> headers) throws InvalidMessageException {
+    @Override
+    public AvailabilityReport checkHealth() {
+        return new AvailabilityReport();
+    }
+
+    ReceivedMessage receiveMessageFromContext(Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws InvalidMessageException {
         try {
-            EventCopybook eventCopybook = EventCopybook.fromCopybookName(headers.get(PUBHUB_COPYBOOK_NAME));
-            MainframeEvent mainframeEvent = eventCopybookService.fromJson(eventCopybook, eventPayloadJson);
-            String template = eventCopybookService.toTemplate(mainframeEvent, EventTemplate.MF_TO_DIST, null);
-            modernEventValidator.validateJson(template, objectMapper);
-            return template;
+            Message.initServiceContext(properties); // from Vals code do not remove
+            return new ReceivedMessage(properties, body, envelope.getRoutingKey());
         } catch (Exception e) {
             throw new InvalidMessageException(e);
         }
     }
 
-    String generateEventPayloadJson(ModernEvent modernEvent) throws InvalidMessageException {
-        try {
-            EventPayload eventPayload = EventPayload.builder()
-                    .payloadData(modernEvent.getEvent().getPayloadData())
-                    .headerData(modernEvent.getEvent().getHeaderData())
-                    .build();
-            return objectMapper.writeValueAsString(eventPayload);
-        } catch (Exception e) {
-            throw new InvalidMessageException(e);
-        }
+    public Acknowledgement getAcknowledgement() {
+        return Acknowledgement.Manual;
     }
 }

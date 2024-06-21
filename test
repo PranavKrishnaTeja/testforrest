@@ -1,0 +1,72 @@
+package com.schwab.brokerage.eventhub.rabbit.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schwab.brokerage.event.parse.service.EventCopybookService;
+import com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties;
+import com.schwab.brokerage.eventhub.rabbit.handler.ModernizedEvent;
+import com.schwab.brokerage.eventhub.rabbit.validation.ModernEventValidator;
+import com.schwab.brokerage.eventhub.utilities.model.ModernEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import schwab.messaging.client.InvalidMessageException;
+import schwab.messaging.client.rabbitmq.Message;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
+import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.Target;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.OBJECT_ID;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_COPYBOOK_NAME;
+import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_DESTINATION_NAME;
+
+@Component
+public class RabbitPublisherService {
+
+    private final EventCopybookService eventCopybookService;
+    private final ObjectMapper objectMapper;
+    private final Map<String, Target> eventDestinations;
+    private final ModernEventValidator modernEventValidator;
+
+    @Autowired
+    public RabbitPublisherService(
+            EventCopybookService eventCopybookService,
+            RabbitRoutingConfigProperties properties,
+            ModernEventValidator modernEventValidator,
+            ObjectMapper objectMapper) {
+        this.eventCopybookService = eventCopybookService;
+        this.objectMapper = objectMapper;
+        this.eventDestinations = properties.getEventDestinations();
+        this.modernEventValidator = modernEventValidator;
+    }
+
+    public ModernEvent buildModernizedEvent(Message message, ModernizedEvent modernizedEvent) throws IOException, InvalidMessageException {
+        // Build and Validate the ModernEvent
+        ModernEvent modernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
+        modernEventValidator.validateEvent(modernEvent);
+        modernizedEvent.log("Built Modern Event");
+
+        // Build and Validate the Headers
+        Map<String, String> headers = new HashMap<>();
+        message.getProperties().getHeaders().forEach((k, v) -> headers.put(k, Objects.toString(v, null)));
+        final Target target = modernEventValidator.validateDestination(eventDestinations, headers);
+        String routingKey = target.getRoutingKey();
+
+        // Check for PubHub-Replay-Consumer-override header
+        String overrideValue = headers.get("PubHub-Replay-Consumer-override");
+        if (overrideValue != null && !overrideValue.isEmpty()) {
+            routingKey += "." + overrideValue;
+        }
+
+        headers.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
+        headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
+        headers.put(PUBHUB_DESTINATION_NAME, routingKey);
+        modernizedEvent.log("Built Headers");
+
+        // Update the Modernized Event
+        modernEvent.getEvent().getHeaderData().setEventName(routingKey);
+
+        return modernEvent;
+    }
+}

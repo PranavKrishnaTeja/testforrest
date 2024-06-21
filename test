@@ -65,38 +65,33 @@ public class RabbitPublisherService {
             for (String overrideValue : overrideValues) {
                 String updatedRoutingKey = routingKey + "." + overrideValue.trim().toLowerCase();
 
-                Map<String, String> updatedHeaders = new HashMap<>(headers);
-                updatedHeaders.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
-                updatedHeaders.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
-                updatedHeaders.put(PUBHUB_DESTINATION_NAME, updatedRoutingKey);
+                headers.put(OBJECT_ID, String.valueOf(modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier()));
+                headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
+                headers.put(PUBHUB_DESTINATION_NAME, updatedRoutingKey);
                 modernizedEvent.log("Built Headers with override: " + overrideValue.trim().toLowerCase());
 
                 // Update the Modernized Event for this override value
-                ModernEvent updatedModernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
-                updatedModernEvent.getEvent().getHeaderData().setEventName(updatedRoutingKey);
-                updatedModernEvent.setHeaders(updatedHeaders);
-                updatedModernEvent.setRoutingKey(updatedRoutingKey);
+                ModernEvent clonedEvent = objectMapper.readValue(objectMapper.writeValueAsString(modernEvent), ModernEvent.class);
+                clonedEvent.getEvent().getHeaderData().setEventName(updatedRoutingKey);
 
-                String eventPayloadJson = generateEventPayloadJson(updatedModernEvent);
-                updatedModernEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, updatedHeaders));
-                updatedModernEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, updatedModernEvent.getJson()).addExtendedFields(updatedHeaders);
+                String eventPayloadJson = generateEventPayloadJson(clonedEvent);
+                modernizedEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
+                modernizedEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernizedEvent.getJson()).addExtendedFields(headers);
 
-                modernEvents.add(updatedModernEvent);
+                modernEvents.add(clonedEvent);
             }
         } else {
             // No override header, process normally
-            headers.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
+            headers.put(OBJECT_ID, String.valueOf(modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier()));
             headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
             headers.put(PUBHUB_DESTINATION_NAME, routingKey);
             modernizedEvent.log("Built Headers without override");
 
             modernEvent.getEvent().getHeaderData().setEventName(routingKey);
-            modernEvent.setHeaders(headers);
-            modernEvent.setRoutingKey(routingKey);
 
             String eventPayloadJson = generateEventPayloadJson(modernEvent);
-            modernEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
-            modernEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernEvent.getJson()).addExtendedFields(headers);
+            modernizedEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
+            modernizedEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernizedEvent.getJson()).addExtendedFields(headers);
 
             modernEvents.add(modernEvent);
         }

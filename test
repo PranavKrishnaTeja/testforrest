@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schwab.brokerage.event.parse.service.EventCopybookService;
 import com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties;
 import com.schwab.brokerage.eventhub.rabbit.handler.ModernizedEvent;
+import com.schwab.brokerage.eventhub.rabbit.model.EventPayload;
 import com.schwab.brokerage.eventhub.rabbit.validation.ModernEventValidator;
 import com.schwab.brokerage.eventhub.utilities.model.ModernEvent;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,6 +74,12 @@ public class RabbitPublisherService {
                 // Update the Modernized Event for this override value
                 ModernEvent updatedModernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
                 updatedModernEvent.getEvent().getHeaderData().setEventName(updatedRoutingKey);
+                updatedModernEvent.setHeaders(updatedHeaders);
+                updatedModernEvent.setRoutingKey(updatedRoutingKey);
+
+                String eventPayloadJson = generateEventPayloadJson(updatedModernEvent);
+                updatedModernEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, updatedHeaders));
+                updatedModernEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, updatedModernEvent.getJson()).addExtendedFields(updatedHeaders);
 
                 modernEvents.add(updatedModernEvent);
             }
@@ -84,9 +91,40 @@ public class RabbitPublisherService {
             modernizedEvent.log("Built Headers without override");
 
             modernEvent.getEvent().getHeaderData().setEventName(routingKey);
+            modernEvent.setHeaders(headers);
+            modernEvent.setRoutingKey(routingKey);
+
+            String eventPayloadJson = generateEventPayloadJson(modernEvent);
+            modernEvent.setJson(target.getTarget() != TargetType.MF2DIST ? eventPayloadJson : generateMf2DistTemplateJson(eventPayloadJson, headers));
+            modernEvent.getLogMessageDetails().addExtendedField(EVENT_DATA_SECURE_FIELD, modernEvent.getJson()).addExtendedFields(headers);
+
             modernEvents.add(modernEvent);
         }
 
         return modernEvents;
+    }
+
+    String generateMf2DistTemplateJson(String eventPayloadJson, Map<String, String> headers) throws InvalidMessageException {
+        try {
+            EventCopybook eventCopybook = EventCopybook.fromCopybookName(headers.get(PUBHUB_COPYBOOK_NAME));
+            MainframeEvent mainframeEvent = eventCopybookService.fromJson(eventCopybook, eventPayloadJson);
+            String template = eventCopybookService.toTemplate(mainframeEvent, EventTemplate.MF_TO_DIST, null);
+            modernEventValidator.validateJson(template, objectMapper);
+            return template;
+        } catch (Exception e) {
+            throw new InvalidMessageException(e);
+        }
+    }
+
+    String generateEventPayloadJson(ModernEvent modernEvent) throws InvalidMessageException {
+        try {
+            EventPayload eventPayload = EventPayload.builder()
+                    .payloadData(modernEvent.getEvent().getPayloadData())
+                    .headerData(modernEvent.getEvent().getHeaderData())
+                    .build();
+            return objectMapper.writeValueAsString(eventPayload);
+        } catch (Exception e) {
+            throw new InvalidMessageException(e);
+        }
     }
 }

@@ -12,7 +12,9 @@ import schwab.messaging.client.InvalidMessageException;
 import schwab.messaging.client.rabbitmq.Message;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -41,7 +43,7 @@ public class RabbitPublisherService {
         this.modernEventValidator = modernEventValidator;
     }
 
-    public ModernEvent buildModernizedEvent(Message message, ModernizedEvent modernizedEvent) throws IOException, InvalidMessageException {
+    public List<ModernEvent> buildModernizedEvents(Message message, ModernizedEvent modernizedEvent) throws IOException, InvalidMessageException {
         // Build and Validate the ModernEvent
         ModernEvent modernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
         modernEventValidator.validateEvent(modernEvent);
@@ -54,19 +56,37 @@ public class RabbitPublisherService {
         String routingKey = target.getRoutingKey();
 
         // Check for PubHub-Replay-Consumer-override header
-        String overrideValue = headers.get("PubHub-Replay-Consumer-override");
-        if (overrideValue != null && !overrideValue.isEmpty()) {
-            routingKey += "." + overrideValue;
+        String overrideHeader = headers.get("PubHub-Replay-Consumer-override");
+        List<ModernEvent> modernEvents = new ArrayList<>();
+
+        if (overrideHeader != null && !overrideHeader.isEmpty()) {
+            String[] overrideValues = overrideHeader.split(",");
+            for (String overrideValue : overrideValues) {
+                String updatedRoutingKey = routingKey + "." + overrideValue.trim().toLowerCase();
+
+                Map<String, String> updatedHeaders = new HashMap<>(headers);
+                updatedHeaders.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
+                updatedHeaders.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
+                updatedHeaders.put(PUBHUB_DESTINATION_NAME, updatedRoutingKey);
+                modernizedEvent.log("Built Headers with override: " + overrideValue.trim().toLowerCase());
+
+                // Update the Modernized Event for this override value
+                ModernEvent updatedModernEvent = objectMapper.readValue(message.getText(), ModernEvent.class);
+                updatedModernEvent.getEvent().getHeaderData().setEventName(updatedRoutingKey);
+
+                modernEvents.add(updatedModernEvent);
+            }
+        } else {
+            // No override header, process normally
+            headers.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
+            headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
+            headers.put(PUBHUB_DESTINATION_NAME, routingKey);
+            modernizedEvent.log("Built Headers without override");
+
+            modernEvent.getEvent().getHeaderData().setEventName(routingKey);
+            modernEvents.add(modernEvent);
         }
 
-        headers.put(OBJECT_ID, String.valueOf((modernEvent.getEvent().getHeaderData().getPublishServiceInformation().getObjectIdentifier())));
-        headers.put(PUBHUB_COPYBOOK_NAME, String.valueOf(modernEvent.getEvent().getHeaderData().getCopybookName()));
-        headers.put(PUBHUB_DESTINATION_NAME, routingKey);
-        modernizedEvent.log("Built Headers");
-
-        // Update the Modernized Event
-        modernEvent.getEvent().getHeaderData().setEventName(routingKey);
-
-        return modernEvent;
+        return modernEvents;
     }
 }

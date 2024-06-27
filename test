@@ -1,100 +1,42 @@
-package com.schwab.brokerage.eventhub.rabbit.service;
+package com.schwab.express.common.gateway.security;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.rabbitmq.client.AMQP;
-import com.schwab.brokerage.event.parse.service.EventCopybookService;
-import com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties;
-import com.schwab.brokerage.eventhub.rabbit.handler.ModernizedEvent;
-import com.schwab.brokerage.eventhub.rabbit.logger.PubHubLogger;
-import com.schwab.brokerage.eventhub.rabbit.validation.ModernEventValidator;
-import com.schwab.brokerage.eventhub.utilities.model.ModernEvent;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
-import schwab.messaging.client.InvalidMessageException;
-import schwab.messaging.client.rabbitmq.Message;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import schwab.endpoint.security.BackendUnavailableException;
+import schwab.endpoint.security.SecurityToken;
+import schwab.endpoint.security.UnauthorizedMessageException;
+import schwab.endpoint.security.http.PolicyBasedMessageAuthenticator;
+import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
+import schwab.endpoint.security.KeyService;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
+@Component
+public class TransitionPolicyBasedMessageAuthenticator extends PolicyBasedMessageAuthenticator {
 
-import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.Target;
-import static com.schwab.brokerage.eventhub.rabbit.config.RabbitRoutingConfigProperties.TargetType;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.OBJECT_ID;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_CLIENT_CORREL_ID;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_COPYBOOK_NAME;
-import static com.schwab.brokerage.eventhub.rabbit.constants.RabbitPublisherConstants.PUBHUB_DESTINATION_NAME;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
+    @Value("${tokenClientId:Customer Account Technology}")
+    String tokenClientId;
 
-@RunWith(MockitoJUnitRunner.class)
-public class RabbitPublisherServiceTest {
-
-    private final ModernizedEvent modernizedEvent = new ModernizedEvent();
-    
-    ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule()); // Need Time Module to parse fixture
-    Map<String, Object> headers = new HashMap<>();
-    Map<String, String> headersString = new HashMap<>();
-
-    @Mock
-    EventCopybookService eventCopybookService;
-    @Mock
-    MainframeEvent mainframeEvent;
-    @Mock
-    Message message;
-    @Mock
-    AMQP.BasicProperties basicProperties;
-    @Mock
-    ModernEventValidator modernEventValidator;
-    @Mock
-    PubHubLogger pubHubLogger;
-    RabbitPublisherService rabbitPublisherService;
-
-    @Before
-    public void setup() {
-        rabbitPublisherService = new RabbitPublisherService(eventCopybookService, new RabbitRoutingConfigProperties(), modernEventValidator, objectMapper);
-        headers.put(OBJECT_ID, "12345");
-        headersString.put(OBJECT_ID, "12345");
-        headers.put(PUBHUB_COPYBOOK_NAME, "CAEV62V3");
-        headersString.put(PUBHUB_COPYBOOK_NAME, "CAEV62V3");
-        headers.put(PUBHUB_CLIENT_CORREL_ID, "1234");
-        headersString.put(PUBHUB_CLIENT_CORREL_ID, "1234");
-        Mockito.when(message.getProperties()).thenReturn(basicProperties);
-        Mockito.when(basicProperties.getHeaders()).thenReturn(headers);
-        modernizedEvent.setPubHubLogger(pubHubLogger);
-        final Target target = new Target();
-        target.setTarget(TargetType.MF2DIST);
-        target.setEnabled(true);
-        target.setRoutingKey("routing.key");
-        Mockito.when(modernEventValidator.validateDestination(any(), any())).thenReturn(target);
+    public TransitionPolicyBasedMessageAuthenticator(EnterprisePolicyRepository repo, @Qualifier("keyService") KeyService ks) {
+        super(repo, ks);
     }
 
-    @Test
-    public void testBuildModernizedEventWithoutOverride() throws IOException, InvalidMessageException {
-        String jsonMessage = "{\"event\": {\"headerData\": {\"publishServiceInformation\": {\"objectIdentifier\": \"12345\"}, \"copybookName\": \"CAEV62V3\"}, \"payloadData\": \"{}\"}}";
-        Mockito.when(message.getText()).thenReturn(jsonMessage);
-
-        ModernEvent result = rabbitPublisherService.buildModernizedEvent(message, modernizedEvent);
-
-        assertThat(result.getEvent().getHeaderData().getEventName()).isEqualTo("routing.key");
-        assertThat(modernizedEvent.getRoutingKey()).isEqualTo("routing.key");
-        assertThat(modernizedEvent.getHeaders().get(PUBHUB_DESTINATION_NAME)).isEqualTo("routing.key");
+    @Override
+    public SecurityToken authenticate(String serviceKey, String operation, String authorization, long clockSkewSeconds)
+            throws UnauthorizedMessageException, BackendUnavailableException {
+        SecurityToken token = super.authenticate(authorization, clockSkewSeconds);
+        this.checkPolicy(serviceKey, operation, token, null);
+        return token;
     }
 
-    @Test
-    public void testBuildModernizedEventWithOverride() throws IOException, InvalidMessageException {
-        headers.put("PubHub-Replay-Consumer-Override", "testOverride");
-        String jsonMessage = "{\"event\": {\"headerData\": {\"publishServiceInformation\": {\"objectIdentifier\": \"12345\"}, \"copybookName\": \"CAEV62V3\"}, \"payloadData\": \"{}\"}}";
-        Mockito.when(message.getText()).thenReturn(jsonMessage);
+    @Override
+    protected void checkPolicy(String serviceKey, String operation, SecurityToken bearer, SecurityToken signature)
+            throws UnauthorizedMessageException {
 
-        ModernEvent result = rabbitPublisherService.buildModernizedEvent(message, modernizedEvent);
+        SecurityToken securityToken = (signature != null ? signature : bearer);
+        String clientId = securityToken.getClientId();
 
-        assertThat(result.getEvent().getHeaderData().getEventName()).isEqualTo("routing.key.testoverride");
-        assertThat(modernizedEvent.getRoutingKey()).isEqualTo("routing.key.testoverride");
-        assertThat(modernizedEvent.getHeaders().get(PUBHUB_DESTINATION_NAME)).isEqualTo("routing.key.testoverride");
+        if (!clientId.equalsIgnoreCase(tokenClientId)) {
+            throw new UnauthorizedMessageException("Unauthorized Token Passed");
+        }
     }
 }

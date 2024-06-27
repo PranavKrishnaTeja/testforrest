@@ -4,36 +4,49 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import schwab.endpoint.security.BackendUnavailableException;
+import schwab.endpoint.security.KeyService;
 import schwab.endpoint.security.SecurityToken;
 import schwab.endpoint.security.UnauthorizedMessageException;
-import schwab.endpoint.security.http.PolicyBasedMessageAuthenticator;
 import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
-import schwab.endpoint.security.KeyService;
+import schwab.endpoint.security.svcreg.ServiceNotFoundException;
+import schwab.endpoint.security.svcreg.ConstraintPolicy;
+
+import java.util.Map;
 
 @Component
-public class TransitionPolicyBasedMessageAuthenticator extends PolicyBasedMessageAuthenticator {
+public class TransitionPolicyBasedMessageAuthenticator {
 
     @Value("${tokenClientId:Customer Account Technology}")
     String tokenClientId;
 
-    public TransitionPolicyBasedMessageAuthenticator(EnterprisePolicyRepository repo, @Qualifier("keyService") KeyService ks) {
-        super(repo, ks);
+    private final EnterprisePolicyRepository policyRepository;
+    private final KeyService keyService;
+
+    public TransitionPolicyBasedMessageAuthenticator(EnterprisePolicyRepository policyRepository, @Qualifier("keyService") KeyService keyService) {
+        this.policyRepository = policyRepository;
+        this.keyService = keyService;
     }
 
-    @Override
     public SecurityToken authenticate(String serviceKey, String operation, String authorization, long clockSkewSeconds)
             throws UnauthorizedMessageException, BackendUnavailableException {
-        SecurityToken token = super.authenticate(authorization, clockSkewSeconds);
-        this.checkPolicy(serviceKey, operation, token, null);
-        return token;
+        try {
+            SecurityToken token = policyRepository.forService(serviceKey)
+                    .appliesTo(new ConstraintPolicy.Filter(serviceKey, operation))
+                    .withAuthorization(Map.of("Authorization", authorization), "POST", "/")
+                    .enforce(keyService);
+
+            checkPolicy(serviceKey, operation, token);
+            return token;
+
+        } catch (ServiceNotFoundException e) {
+            throw new UnauthorizedMessageException("Service not found: " + serviceKey, e);
+        }
     }
 
-    @Override
-    protected void checkPolicy(String serviceKey, String operation, SecurityToken bearer, SecurityToken signature)
+    protected void checkPolicy(String serviceKey, String operation, SecurityToken token)
             throws UnauthorizedMessageException {
 
-        SecurityToken securityToken = (signature != null ? signature : bearer);
-        String clientId = securityToken.getClientId();
+        String clientId = token.getClientId();
 
         if (!clientId.equalsIgnoreCase(tokenClientId)) {
             throw new UnauthorizedMessageException("Unauthorized Token Passed");

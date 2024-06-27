@@ -1,3 +1,27 @@
+package com.schwab.express.common.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
+
+@Configuration
+public class SecurityConfig {
+
+    @Bean
+    public EnterprisePolicyRepository enterprisePolicyRepository(@Value("${schwab.policy.repository.url}") String policyRepositoryUrl) {
+        return new EnterprisePolicyRepository.Builder()
+                .url(policyRepositoryUrl)
+                .build();
+    }
+}
+
+
+
+
+
+
+
+
 package com.schwab.express.common.gateway.security;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -11,6 +35,7 @@ import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
 import schwab.endpoint.security.svcreg.ServiceNotFoundException;
 import schwab.endpoint.security.svcreg.ConstraintPolicy;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Component
@@ -30,16 +55,19 @@ public class TransitionPolicyBasedMessageAuthenticator {
     public SecurityToken authenticate(String serviceKey, String operation, String authorization, long clockSkewSeconds)
             throws UnauthorizedMessageException, BackendUnavailableException {
         try {
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Authorization", authorization);
+
             SecurityToken token = policyRepository.forService(serviceKey)
                     .appliesTo(new ConstraintPolicy.Filter(serviceKey, operation))
-                    .withAuthorization(Map.of("Authorization", authorization), "POST", "/")
+                    .withAuthorization(headers, "POST", "/")
                     .enforce(keyService);
 
             checkPolicy(serviceKey, operation, token);
             return token;
 
         } catch (ServiceNotFoundException e) {
-            throw new UnauthorizedMessageException("Service not found: " + serviceKey, e);
+            throw new UnauthorizedMessageException("Service not found: " + serviceKey);
         }
     }
 
@@ -53,3 +81,114 @@ public class TransitionPolicyBasedMessageAuthenticator {
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.express.common.config;
+
+import com.schwab.express.common.gateway.security.TransitionPolicyBasedMessageAuthenticator;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.rsocket.RSocketStrategies;
+import org.springframework.messaging.rsocket.annotation.support.RSocketMessageHandler;
+import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
+import org.springframework.security.config.annotation.rsocket.EnableRSocketSecurity;
+import org.springframework.security.config.annotation.rsocket.RSocketSecurity;
+import org.springframework.security.messaging.handler.invocation.reactive.AuthenticationPrincipalArgumentResolver;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtReactiveAuthenticationManager;
+import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
+import org.springframework.security.rsocket.core.PayloadSocketAcceptorInterceptor;
+import reactor.core.publisher.Mono;
+
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.Map;
+
+@Configuration
+@EnableRSocketSecurity
+@EnableReactiveMethodSecurity
+public class RSocketSecurityConfig {
+
+    @Value("${schwab.rrbus.service.key}")
+    String serviceKey;
+
+    @Autowired
+    private TransitionPolicyBasedMessageAuthenticator transitionPolicyBasedMessageAuthenticator;
+
+    @Bean
+    RSocketMessageHandler messageHandler(RSocketStrategies strategies) {
+        RSocketMessageHandler handler = new RSocketMessageHandler();
+        handler
+                .getArgumentResolverConfigurer()
+                .addCustomResolver(new AuthenticationPrincipalArgumentResolver());
+        handler.setRSocketStrategies(strategies);
+        return handler;
+    }
+
+    @Bean
+    public PayloadSocketAcceptorInterceptor rsocketInterceptor(RSocketSecurity rsocket) {
+        rsocket
+                .authorizePayload(authorize -> authorize.anyExchange().authenticated())
+                .jwt(
+                        jwtSpec -> jwtSpec.authenticationManager(jwtReactiveAuthenticationManager()));
+
+        return rsocket.build();
+    }
+
+    @Bean
+    public JwtReactiveAuthenticationManager jwtReactiveAuthenticationManager() {
+        JwtReactiveAuthenticationManager jwtReactiveAuthenticationManager =
+                new JwtReactiveAuthenticationManager(defaultReactiveJwtDecoder());
+
+        JwtAuthenticationConverter authenticationConverter = new JwtAuthenticationConverter();
+        jwtReactiveAuthenticationManager.setJwtAuthenticationConverter(
+                new ReactiveJwtAuthenticationConverterAdapter(authenticationConverter));
+        return jwtReactiveAuthenticationManager;
+    }
+
+    @Bean
+    public ReactiveJwtDecoder defaultReactiveJwtDecoder() {
+        return new SchwabReactiveJwtDecoder();
+    }
+
+    public class SchwabReactiveJwtDecoder implements ReactiveJwtDecoder {
+
+        @Override
+        public Mono<Jwt> decode(String token) {
+            try {
+
+                Map<String, Object> headers = Collections.singletonMap("Content-Type", "application/json");
+
+                Map<String, Object> map = Collections.singletonMap("Content-Type", "application/json");
+
+                String auth = "Bearer " + token;
+
+                transitionPolicyBasedMessageAuthenticator.authenticate(serviceKey, "POST", auth, 0L);
+
+                return Mono.just(
+                        new Jwt(token, Instant.now(), Instant.now().plus(10, ChronoUnit.DAYS), headers, map));
+
+            } catch (Exception e) {
+                throw new JwtException("Cannot Authenticate Token " + e.getMessage(), e);
+            }
+        }
+    }
+}
+
+
+

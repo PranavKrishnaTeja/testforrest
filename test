@@ -1,11 +1,136 @@
 package com.schwab.express.common.config.aerospike;
 
+import com.aerospike.client.policy.*;
+
+import static com.schwab.express.common.config.aerospike.AerospikeConstants.PROTOCOL_TLSV12;
+
+public class PolicyBundle {
+
+    public static ClientPolicy getPolicy(AerospikeClientProperties properties) {
+        Policy readPolicy = readPolicy(properties);
+        BatchPolicy batchPolicy = batchPolicy(properties);
+        QueryPolicy queryPolicy = queryPolicy(properties);
+        return getClientPolicy(properties, readPolicy, batchPolicy, queryPolicy);
+    }
+
+    private static ClientPolicy getClientPolicy(AerospikeClientProperties clientProperties, Policy readPolicy, BatchPolicy batchPolicy, QueryPolicy queryPolicy) {
+        ClientPolicy clientPolicy = new ClientPolicy();
+        clientPolicy.user = clientProperties.getUser();
+        clientPolicy.password = clientProperties.getPassword();
+        clientPolicy.clusterName = clientProperties.getClusterName();
+        clientPolicy.timeout = clientProperties.getClientPolicytimeout();
+        clientPolicy.tendInterval = clientProperties.getTendInterval();
+        clientPolicy.failIfNotConnected = clientProperties.isFailIfNotConnected();
+        clientPolicy.writePolicyDefault.maxRetries = clientProperties.getMaxWriteRetries();
+        clientPolicy.writePolicyDefault.totalTimeout = clientProperties.getWritePolicyTotalTimeout();
+
+        // Optional configuration
+        if (clientProperties.getMinConnectionsPerNode() != null) {
+            clientPolicy.minConnsPerNode = clientProperties.getMinConnectionsPerNode();
+        }
+        if (clientProperties.getMaxSocketIdle() != null) {
+            clientPolicy.maxSocketIdle = clientProperties.getMaxSocketIdle();
+        }
+
+        if (clientProperties.getMaxConnectionsPerNode() != null) {
+            clientPolicy.maxConnsPerNode = clientProperties.getMaxConnectionsPerNode();
+        }
+
+        clientPolicy.readPolicyDefault = readPolicy;
+        clientPolicy.batchPolicyDefault = batchPolicy;
+        clientPolicy.queryPolicyDefault = queryPolicy;
+
+        return clientPolicy;
+    }
+
+    private static Policy readPolicy(AerospikeClientProperties clientProperties) {
+        Policy readPolicy = new Policy();
+        readPolicy.maxRetries = clientProperties.getReadPolicyMaxRetires();
+        readPolicy.sleepBetweenRetries = clientProperties.getReadPolicySleepBetweenRetries();
+        readPolicy.totalTimeout = clientProperties.getReadPolicyTotalTimeout();
+
+        // Optional configuration
+        if (clientProperties.getReadMaxSocketTimeout() != null) {
+            readPolicy.socketTimeout = clientProperties.getReadMaxSocketTimeout();
+        }
+
+        return readPolicy;
+    }
+
+    private static BatchPolicy batchPolicy(AerospikeClientProperties clientProperties) {
+        BatchPolicy batchPolicy = new BatchPolicy();
+        batchPolicy.maxRetries = clientProperties.getBatchPolicyMaxRetires();
+        batchPolicy.sleepBetweenRetries = clientProperties.getBatchPolicySleepBetweenRetries();
+        batchPolicy.totalTimeout = clientProperties.getBatchPolicyTotalTimeout();
+        batchPolicy.sendSetName = clientProperties.isBatchPolicySendSetName();
+        batchPolicy.maxConcurrentThreads = clientProperties.getMaxConcurrentThreads();
+
+        // Optional configuration
+        if (clientProperties.getBatchMaxSocketTimeout() != null) {
+            batchPolicy.socketTimeout = clientProperties.getBatchMaxSocketTimeout();
+        }
+
+        return batchPolicy;
+    }
+
+    private static QueryPolicy queryPolicy(AerospikeClientProperties clientProperties) {
+        QueryPolicy queryPolicy = new QueryPolicy();
+        queryPolicy.maxRetries = clientProperties.getQueryPolicyMaxRetires();
+        queryPolicy.sleepBetweenRetries = clientProperties.getQueryPolicySleepBetweenRetries();
+        queryPolicy.totalTimeout = clientProperties.getQueryPolicyTotalTimeout();
+
+        // Optional configuration
+        if (clientProperties.getQueryMaxSocketTimeout() != null) {
+            queryPolicy.socketTimeout = clientProperties.getQueryMaxSocketTimeout();
+        }
+
+        return queryPolicy;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.express.common.config.aerospike;
+
 import com.aerospike.client.AerospikeClient;
 import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Host;
 import com.aerospike.client.Log;
 import com.aerospike.client.policy.AuthMode;
 import com.aerospike.client.policy.ClientPolicy;
+import com.aerospike.client.policy.TlsPolicy;
 import com.schwab.express.certificate.PreferencePKCS12;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -100,8 +225,21 @@ public class AerospikeClientConfiguration {
 
     private AerospikeClient getAerospikeClient(AerospikeClientProperties clientProperties) {
         ClientPolicy clientPolicy = PolicyBundle.getPolicy(clientProperties);
-        Host host = new Host(clientProperties.getHost(), clientProperties.getPort());
         
+        if (preferencePKCS12.isCertificateAvailable()) {
+            try {
+                SSLContext sslContext = preferencePKCS12.getPkcs12().getSSLContext();
+                clientPolicy.authMode = AuthMode.EXTERNAL;
+                clientPolicy.tlsPolicy = new TlsPolicy();
+                clientPolicy.tlsPolicy.protocols = new String[]{AerospikeConstants.PROTOCOL_TLSV12};
+                clientPolicy.tlsPolicy.sslContext = sslContext;
+            } catch (GeneralSecurityException e) {
+                log.error("Error occurred while setting up the SSL Context to connect to Aerospike: ", e);
+                throw new AerospikeException(e);
+            }
+        }
+
+        Host host = new Host(clientProperties.getHost(), clientProperties.getPort());
         if (clientProperties.isFailIfNotConnected()) {
             try {
                 return constructAerospikeClient(clientPolicy, host);
@@ -154,139 +292,5 @@ public class AerospikeClientConfiguration {
             return Log.Level.WARN;
         }
         return Log.Level.ERROR;
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.schwab.express.common.config.aerospike;
-
-import com.aerospike.client.policy.*;
-import com.schwab.express.certificate.PreferencePKCS12;
-
-import javax.net.ssl.SSLContext;
-
-import static com.schwab.express.common.config.aerospike.AerospikeConstants.PROTOCOL_TLSV12;
-
-public class PolicyBundle {
-
-    private static PreferencePKCS12 preferencePKCS12;
-
-    public PolicyBundle(PreferencePKCS12 preferencePKCS12) {
-        this.preferencePKCS12 = preferencePKCS12;
-    }
-
-    public static ClientPolicy getPolicy(AerospikeClientProperties properties) {
-        Policy readPolicy = readPolicy(properties);
-        BatchPolicy batchPolicy = batchPolicy(properties);
-        QueryPolicy queryPolicy = queryPolicy(properties);
-        return getClientPolicy(properties, readPolicy, batchPolicy, queryPolicy);
-    }
-
-    private static ClientPolicy getClientPolicy(AerospikeClientProperties clientProperties, Policy readPolicy, BatchPolicy batchPolicy, QueryPolicy queryPolicy) {
-        ClientPolicy clientPolicy = new ClientPolicy();
-        clientPolicy.user = clientProperties.getUser();
-        clientPolicy.password = clientProperties.getPassword();
-        clientPolicy.clusterName = clientProperties.getClusterName();
-        clientPolicy.timeout = clientProperties.getClientPolicytimeout();
-        clientPolicy.tendInterval = clientProperties.getTendInterval();
-        clientPolicy.failIfNotConnected = clientProperties.isFailIfNotConnected();
-        clientPolicy.writePolicyDefault.maxRetries = clientProperties.getMaxWriteRetries();
-        clientPolicy.writePolicyDefault.totalTimeout = clientProperties.getWritePolicyTotalTimeout();
-
-        // Optional configuration
-        if (clientProperties.getMinConnectionsPerNode() != null) {
-            clientPolicy.minConnsPerNode = clientProperties.getMinConnectionsPerNode();
-        }
-        if (clientProperties.getMaxSocketIdle() != null) {
-            clientPolicy.maxSocketIdle = clientProperties.getMaxSocketIdle();
-        }
-        if (clientProperties.getMaxConnectionsPerNode() != null) {
-            clientPolicy.maxConnsPerNode = clientProperties.getMaxConnectionsPerNode();
-        }
-
-        clientPolicy.readPolicyDefault = readPolicy;
-        clientPolicy.batchPolicyDefault = batchPolicy;
-        clientPolicy.queryPolicyDefault = queryPolicy;
-
-        if (preferencePKCS12.isCertificateAvailable()) {
-            try {
-                SSLContext sslContext = preferencePKCS12.getPkcs12().getSSLContext();
-                clientPolicy.authMode = AuthMode.EXTERNAL;
-                clientPolicy.tlsPolicy = new TlsPolicy();
-                clientPolicy.tlsPolicy.protocols = new String[]{PROTOCOL_TLSV12};
-                clientPolicy.sslContext = sslContext;
-            } catch (GeneralSecurityException e) {
-                throw new RuntimeException("Error occurred while setting up the SSL Context to connect to Aerospike: ", e);
-            }
-        }
-
-        return clientPolicy;
-    }
-
-    private static Policy readPolicy(AerospikeClientProperties clientProperties) {
-        Policy readPolicy = new Policy();
-        readPolicy.maxRetries = clientProperties.getReadPolicyMaxRetires();
-        readPolicy.sleepBetweenRetries = clientProperties.getReadPolicySleepBetweenRetries();
-        readPolicy.totalTimeout = clientProperties.getReadPolicyTotalTimeout();
-
-        // Optional configuration
-        if (clientProperties.getReadMaxSocketTimeout() != null) {
-            readPolicy.socketTimeout = clientProperties.getReadMaxSocketTimeout();
-        }
-
-        return readPolicy;
-    }
-
-    private static BatchPolicy batchPolicy(AerospikeClientProperties clientProperties) {
-        BatchPolicy batchPolicy = new BatchPolicy();
-        batchPolicy.maxRetries = clientProperties.getBatchPolicyMaxRetires();
-        batchPolicy.sleepBetweenRetries = clientProperties.getBatchPolicySleepBetweenRetries();
-        batchPolicy.totalTimeout = clientProperties.getBatchPolicyTotalTimeout();
-        batchPolicy.sendSetName = clientProperties.isBatchPolicySendSetName();
-        batchPolicy.maxConcurrentThreads = clientProperties.getMaxConcurrentThreads();
-
-        // Optional configuration
-        if (clientProperties.getBatchMaxSocketTimeout() != null) {
-            batchPolicy.socketTimeout = clientProperties.getBatchMaxSocketTimeout();
-        }
-
-        return batchPolicy;
-    }
-
-    private static QueryPolicy queryPolicy(AerospikeClientProperties clientProperties) {
-        QueryPolicy queryPolicy = new QueryPolicy();
-        queryPolicy.maxRetries = clientProperties.getQueryPolicyMaxRetires();
-        queryPolicy.sleepBetweenRetries = clientProperties.getQueryPolicySleepBetweenRetries();
-        queryPolicy.totalTimeout = clientProperties.getQueryPolicyTotalTimeout();
-
-        // Optional configuration
-        if (clientProperties.getQueryMaxSocketTimeout() != null) {
-            queryPolicy.socketTimeout = clientProperties.getQueryMaxSocketTimeout();
-        }
-
-        return queryPolicy;
     }
 }

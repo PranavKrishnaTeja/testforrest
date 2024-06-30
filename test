@@ -1,84 +1,159 @@
-package com.schwab.express.common.config;
+package com.schwab.express.common.config.aerospike;
 
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
-
-@Configuration
-public class SecurityConfig {
-
-    @Bean
-    public EnterprisePolicyRepository enterprisePolicyRepository(@Value("${schwab.policy.repository.url}") String policyRepositoryUrl) {
-        return new EnterprisePolicyRepository.Builder()
-                .url(policyRepositoryUrl)
-                .build();
-    }
-}
-
-
-
-
-
-
-
-
-package com.schwab.express.common.gateway.security;
-
+import com.aerospike.client.AerospikeClient;
+import com.aerospike.client.AerospikeException;
+import com.aerospike.client.Host;
+import com.aerospike.client.Log;
+import com.aerospike.client.policy.AuthMode;
+import com.aerospike.client.policy.ClientPolicy;
+import com.schwab.express.certificate.PreferencePKCS12;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import schwab.endpoint.security.BackendUnavailableException;
-import schwab.endpoint.security.KeyService;
-import schwab.endpoint.security.SecurityToken;
-import schwab.endpoint.security.UnauthorizedMessageException;
-import schwab.endpoint.security.svcreg.EnterprisePolicyRepository;
-import schwab.endpoint.security.svcreg.ServiceNotFoundException;
-import schwab.endpoint.security.svcreg.ConstraintPolicy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 
-import java.util.HashMap;
-import java.util.Map;
+import javax.net.ssl.SSLContext;
+import java.security.GeneralSecurityException;
+import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
-@Component
-public class TransitionPolicyBasedMessageAuthenticator {
+@Slf4j
+@Configuration
+@AllArgsConstructor
+@ConditionalOnProperty(prefix = "express.aerospike", name = "enabled", havingValue = "true")
+public class AerospikeClientConfiguration {
 
-    @Value("${tokenClientId:Customer Account Technology}")
-    String tokenClientId;
+    private AerospikeProperties aerospikeProperties;
+    private final PreferencePKCS12 preferencePKCS12; // Injecting PreferencePKCS12 here
+    public static final String V1_PRIMARY_CLIENT = "aerospikeClientV1Primary";
+    public static final String V1_SECONDARY_CLIENT = "aerospikeClientV1Secondary";
+    public static final String V2_PRIMARY_CLIENT = "aerospikeClientV2Primary";
+    public static final String V2_SECONDARY_CLIENT = "aerospikeClientV2Secondary";
 
-    private final EnterprisePolicyRepository policyRepository;
-    private final KeyService keyService;
-
-    public TransitionPolicyBasedMessageAuthenticator(EnterprisePolicyRepository policyRepository, @Qualifier("keyService") KeyService keyService) {
-        this.policyRepository = policyRepository;
-        this.keyService = keyService;
+    @Bean
+    @Profile("!test")
+    @Qualifier(V1_PRIMARY_CLIENT)
+    public AerospikeClient aerospikeV1ClientPrimary(@Qualifier("primaryV1ClientProperties") AerospikeClientProperties clientProperties, AerospikeClientLogger clientLogger) {
+        Log.setCallback(clientLogger);
+        return getAerospikeClient(clientProperties);
     }
 
-    public SecurityToken authenticate(String serviceKey, String operation, String authorization, long clockSkewSeconds)
-            throws UnauthorizedMessageException, BackendUnavailableException {
-        try {
-            Map<String, String> headers = new HashMap<>();
-            headers.put("Authorization", authorization);
+    @Bean
+    @Profile("!test")
+    @Qualifier(V1_SECONDARY_CLIENT)
+    public AerospikeClient aerospikeV1ClientSecondary(@Qualifier("secondaryV1ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V1_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
+        return aerospikeProperties.isUseSingleClientV1() ? aerospikeClient : getAerospikeClient(clientProperties);
+    }
 
-            SecurityToken token = policyRepository.forService(serviceKey)
-                    .appliesTo(new ConstraintPolicy.Filter(serviceKey, operation))
-                    .withAuthorization(headers, "POST", "/")
-                    .enforce(keyService);
+    @Bean
+    @Profile("!test")
+    @Qualifier(V2_PRIMARY_CLIENT)
+    public AerospikeClient aerospikeV2ClientPrimary(@Qualifier("primaryV2ClientProperties") AerospikeClientProperties clientProperties) {
+        return getAerospikeClient(clientProperties);
+    }
 
-            checkPolicy(serviceKey, operation, token);
-            return token;
+    @Bean
+    @Profile("!test")
+    @Qualifier(V2_SECONDARY_CLIENT)
+    public AerospikeClient aerospikeV2ClientSecondary(@Qualifier("secondaryV2ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
+        return aerospikeProperties.isUseSingleClientV2() ? aerospikeClient : getAerospikeClient(clientProperties);
+    }
 
-        } catch (ServiceNotFoundException e) {
-            throw new UnauthorizedMessageException("Service not found: " + serviceKey);
+    // Client-specific configuration properties
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v1.primary")
+    public AerospikeClientProperties primaryV1ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v1.secondary")
+    public AerospikeClientProperties secondaryV1ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v2.primary")
+    public AerospikeClientProperties primaryV2ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v2.secondary")
+    public AerospikeClientProperties secondaryV2ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    // Create a client logger using either our specified level or our current class level
+    @Bean
+    public AerospikeClientLogger aerospikeClientLogger() {
+        return new AerospikeClientLogger(aerospikeProperties.getClientLogLevel() != null ? aerospikeProperties.getClientLogLevel() : getCurrentRootLevel());
+    }
+
+    private AerospikeClient getAerospikeClient(AerospikeClientProperties clientProperties) {
+        ClientPolicy clientPolicy = PolicyBundle.getPolicy(clientProperties);
+        Host host = new Host(clientProperties.getHost(), clientProperties.getPort());
+        
+        if (clientProperties.isFailIfNotConnected()) {
+            try {
+                return constructAerospikeClient(clientPolicy, host);
+            } catch (Exception e) {
+                if (clientProperties.isLdapOnly() || !clientProperties.isFallbackToLdap()) {
+                    log.error("Error occurred while attempting to connect to Aerospike. We will not attempt to try again and will return null.", e);
+                    return null;
+                } else {
+                    log.error("Error occurred while attempting to connect to Aerospike. Will try again using LDAP.", e);
+                    clientPolicy.authMode = AuthMode.INTERNAL;  // Couldn't connect using certificate, so try to connect using LDAP
+                    try {
+                        return constructAerospikeClient(clientPolicy, host);
+                    } catch (Exception e2) {
+                        log.error("Error occurred while attempting to connect to Aerospike using LDAP. We will not attempt to try again and will return null.", e2);
+                        return null;
+                    }
+                }
+            }
+        } else {
+            return constructAerospikeClient(clientPolicy, host);
         }
     }
 
-    protected void checkPolicy(String serviceKey, String operation, SecurityToken token)
-            throws UnauthorizedMessageException {
-
-        String clientId = token.getClientId();
-
-        if (!clientId.equalsIgnoreCase(tokenClientId)) {
-            throw new UnauthorizedMessageException("Unauthorized Token Passed");
+    private AerospikeClient constructAerospikeClient(ClientPolicy clientPolicy, Host host) {
+        AerospikeClient client = new AerospikeClient(clientPolicy, host);
+        if (!client.isConnected()) {
+            throw new AerospikeException("Not connected!");
         }
+        return client;
+    }
+
+    @Bean
+    public Executor aerospikeExecutor(BeanFactory beanFactory) {
+        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeThreadCount());
+    }
+
+    @Bean("aerospikeTransformerExecutor")
+    public Executor aerospikeTransformerExecutor(BeanFactory beanFactory) {
+        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeTransformerThreadCount());
+    }
+
+    private Log.Level getCurrentRootLevel() {
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isTraceEnabled() || LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isDebugEnabled()) {
+            return Log.Level.DEBUG;
+        }
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isInfoEnabled()) {
+            return Log.Level.INFO;
+        }
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isWarnEnabled()) {
+            return Log.Level.WARN;
+        }
+        return Log.Level.ERROR;
     }
 }
 
@@ -92,103 +167,126 @@ public class TransitionPolicyBasedMessageAuthenticator {
 
 
 
-package com.schwab.express.common.config;
 
-import com.schwab.express.common.gateway.security.TransitionPolicyBasedMessageAuthenticator;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.messaging.rsocket.RSocketStrategies;
-import org.springframework.messaging.rsocket.annotation.support.RSocketMessageHandler;
-import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
-import org.springframework.security.config.annotation.rsocket.EnableRSocketSecurity;
-import org.springframework.security.config.annotation.rsocket.RSocketSecurity;
-import org.springframework.security.messaging.handler.invocation.reactive.AuthenticationPrincipalArgumentResolver;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtException;
-import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtReactiveAuthenticationManager;
-import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
-import org.springframework.security.rsocket.core.PayloadSocketAcceptorInterceptor;
-import reactor.core.publisher.Mono;
 
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Collections;
-import java.util.Map;
 
-@Configuration
-@EnableRSocketSecurity
-@EnableReactiveMethodSecurity
-public class RSocketSecurityConfig {
 
-    @Value("${schwab.rrbus.service.key}")
-    String serviceKey;
 
-    @Autowired
-    private TransitionPolicyBasedMessageAuthenticator transitionPolicyBasedMessageAuthenticator;
 
-    @Bean
-    RSocketMessageHandler messageHandler(RSocketStrategies strategies) {
-        RSocketMessageHandler handler = new RSocketMessageHandler();
-        handler
-                .getArgumentResolverConfigurer()
-                .addCustomResolver(new AuthenticationPrincipalArgumentResolver());
-        handler.setRSocketStrategies(strategies);
-        return handler;
+
+
+
+
+
+
+
+
+package com.schwab.express.common.config.aerospike;
+
+import com.aerospike.client.policy.*;
+import com.schwab.express.certificate.PreferencePKCS12;
+
+import javax.net.ssl.SSLContext;
+
+import static com.schwab.express.common.config.aerospike.AerospikeConstants.PROTOCOL_TLSV12;
+
+public class PolicyBundle {
+
+    private static PreferencePKCS12 preferencePKCS12;
+
+    public PolicyBundle(PreferencePKCS12 preferencePKCS12) {
+        this.preferencePKCS12 = preferencePKCS12;
     }
 
-    @Bean
-    public PayloadSocketAcceptorInterceptor rsocketInterceptor(RSocketSecurity rsocket) {
-        rsocket
-                .authorizePayload(authorize -> authorize.anyExchange().authenticated())
-                .jwt(
-                        jwtSpec -> jwtSpec.authenticationManager(jwtReactiveAuthenticationManager()));
-
-        return rsocket.build();
+    public static ClientPolicy getPolicy(AerospikeClientProperties properties) {
+        Policy readPolicy = readPolicy(properties);
+        BatchPolicy batchPolicy = batchPolicy(properties);
+        QueryPolicy queryPolicy = queryPolicy(properties);
+        return getClientPolicy(properties, readPolicy, batchPolicy, queryPolicy);
     }
 
-    @Bean
-    public JwtReactiveAuthenticationManager jwtReactiveAuthenticationManager() {
-        JwtReactiveAuthenticationManager jwtReactiveAuthenticationManager =
-                new JwtReactiveAuthenticationManager(defaultReactiveJwtDecoder());
+    private static ClientPolicy getClientPolicy(AerospikeClientProperties clientProperties, Policy readPolicy, BatchPolicy batchPolicy, QueryPolicy queryPolicy) {
+        ClientPolicy clientPolicy = new ClientPolicy();
+        clientPolicy.user = clientProperties.getUser();
+        clientPolicy.password = clientProperties.getPassword();
+        clientPolicy.clusterName = clientProperties.getClusterName();
+        clientPolicy.timeout = clientProperties.getClientPolicytimeout();
+        clientPolicy.tendInterval = clientProperties.getTendInterval();
+        clientPolicy.failIfNotConnected = clientProperties.isFailIfNotConnected();
+        clientPolicy.writePolicyDefault.maxRetries = clientProperties.getMaxWriteRetries();
+        clientPolicy.writePolicyDefault.totalTimeout = clientProperties.getWritePolicyTotalTimeout();
 
-        JwtAuthenticationConverter authenticationConverter = new JwtAuthenticationConverter();
-        jwtReactiveAuthenticationManager.setJwtAuthenticationConverter(
-                new ReactiveJwtAuthenticationConverterAdapter(authenticationConverter));
-        return jwtReactiveAuthenticationManager;
-    }
+        // Optional configuration
+        if (clientProperties.getMinConnectionsPerNode() != null) {
+            clientPolicy.minConnsPerNode = clientProperties.getMinConnectionsPerNode();
+        }
+        if (clientProperties.getMaxSocketIdle() != null) {
+            clientPolicy.maxSocketIdle = clientProperties.getMaxSocketIdle();
+        }
+        if (clientProperties.getMaxConnectionsPerNode() != null) {
+            clientPolicy.maxConnsPerNode = clientProperties.getMaxConnectionsPerNode();
+        }
 
-    @Bean
-    public ReactiveJwtDecoder defaultReactiveJwtDecoder() {
-        return new SchwabReactiveJwtDecoder();
-    }
+        clientPolicy.readPolicyDefault = readPolicy;
+        clientPolicy.batchPolicyDefault = batchPolicy;
+        clientPolicy.queryPolicyDefault = queryPolicy;
 
-    public class SchwabReactiveJwtDecoder implements ReactiveJwtDecoder {
-
-        @Override
-        public Mono<Jwt> decode(String token) {
+        if (preferencePKCS12.isCertificateAvailable()) {
             try {
-
-                Map<String, Object> headers = Collections.singletonMap("Content-Type", "application/json");
-
-                Map<String, Object> map = Collections.singletonMap("Content-Type", "application/json");
-
-                String auth = "Bearer " + token;
-
-                transitionPolicyBasedMessageAuthenticator.authenticate(serviceKey, "POST", auth, 0L);
-
-                return Mono.just(
-                        new Jwt(token, Instant.now(), Instant.now().plus(10, ChronoUnit.DAYS), headers, map));
-
-            } catch (Exception e) {
-                throw new JwtException("Cannot Authenticate Token " + e.getMessage(), e);
+                SSLContext sslContext = preferencePKCS12.getPkcs12().getSSLContext();
+                clientPolicy.authMode = AuthMode.EXTERNAL;
+                clientPolicy.tlsPolicy = new TlsPolicy();
+                clientPolicy.tlsPolicy.protocols = new String[]{PROTOCOL_TLSV12};
+                clientPolicy.sslContext = sslContext;
+            } catch (GeneralSecurityException e) {
+                throw new RuntimeException("Error occurred while setting up the SSL Context to connect to Aerospike: ", e);
             }
         }
+
+        return clientPolicy;
+    }
+
+    private static Policy readPolicy(AerospikeClientProperties clientProperties) {
+        Policy readPolicy = new Policy();
+        readPolicy.maxRetries = clientProperties.getReadPolicyMaxRetires();
+        readPolicy.sleepBetweenRetries = clientProperties.getReadPolicySleepBetweenRetries();
+        readPolicy.totalTimeout = clientProperties.getReadPolicyTotalTimeout();
+
+        // Optional configuration
+        if (clientProperties.getReadMaxSocketTimeout() != null) {
+            readPolicy.socketTimeout = clientProperties.getReadMaxSocketTimeout();
+        }
+
+        return readPolicy;
+    }
+
+    private static BatchPolicy batchPolicy(AerospikeClientProperties clientProperties) {
+        BatchPolicy batchPolicy = new BatchPolicy();
+        batchPolicy.maxRetries = clientProperties.getBatchPolicyMaxRetires();
+        batchPolicy.sleepBetweenRetries = clientProperties.getBatchPolicySleepBetweenRetries();
+        batchPolicy.totalTimeout = clientProperties.getBatchPolicyTotalTimeout();
+        batchPolicy.sendSetName = clientProperties.isBatchPolicySendSetName();
+        batchPolicy.maxConcurrentThreads = clientProperties.getMaxConcurrentThreads();
+
+        // Optional configuration
+        if (clientProperties.getBatchMaxSocketTimeout() != null) {
+            batchPolicy.socketTimeout = clientProperties.getBatchMaxSocketTimeout();
+        }
+
+        return batchPolicy;
+    }
+
+    private static QueryPolicy queryPolicy(AerospikeClientProperties clientProperties) {
+        QueryPolicy queryPolicy = new QueryPolicy();
+        queryPolicy.maxRetries = clientProperties.getQueryPolicyMaxRetires();
+        queryPolicy.sleepBetweenRetries = clientProperties.getQueryPolicySleepBetweenRetries();
+        queryPolicy.totalTimeout = clientProperties.getQueryPolicyTotalTimeout();
+
+        // Optional configuration
+        if (clientProperties.getQueryMaxSocketTimeout() != null) {
+            queryPolicy.socketTimeout = clientProperties.getQueryMaxSocketTimeout();
+        }
+
+        return queryPolicy;
     }
 }
-
-
-

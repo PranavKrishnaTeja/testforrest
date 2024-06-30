@@ -1,19 +1,277 @@
 package com.schwab.express.common.config.aerospike;
 
+import com.aerospike.client.AerospikeClient;
+import com.aerospike.client.AerospikeException;
+import com.aerospike.client.Host;
+import com.aerospike.client.Log;
+import com.aerospike.client.async.EventLoops;
+import com.aerospike.client.policy.AuthMode;
+import com.aerospike.client.policy.ClientPolicy;
+import com.schwab.express.certificate.PreferencePKCS12;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import schwab.discovery.security.KeyNotFoundException;
+import schwab.discovery.security.KeyServiceUnavailableException;
+
+import javax.net.ssl.SSLContext;
+import java.security.GeneralSecurityException;
+import java.security.NoSuchAlgorithmException;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+
+@Slf4j
+@Configuration
+@AllArgsConstructor
+@ConditionalOnProperty(prefix = "express.aerospike", name = "enabled", havingValue = "true")
+public class AerospikeClientConfiguration {
+
+    private AerospikeProperties aerospikeProperties;
+    public static final String V1_PRIMARY_CLIENT = "aerospikeClientV1Primary";
+    public static final String V1_SECONDARY_CLIENT = "aerospikeClientV1Secondary";
+    public static final String V2_PRIMARY_CLIENT = "aerospikeClientV2Primary";
+    public static final String V2_SECONDARY_CLIENT = "aerospikeClientV2Secondary";
+    public static final String V2_AEROSPIKE_SSL_CONTEXT = "aerospikeSSLContext";
+
+    @Bean
+    @Profile("!test")
+    @Qualifier(V2_AEROSPIKE_SSL_CONTEXT)
+    public SSLContext getSSLContextForAerospike(PreferencePKCS12 preferencePKCS12) {
+        if (preferencePKCS12.isCertificateAvailable()) {
+            try {
+                log.trace("****** getSSLContextForAerospike - instantiating bean...");
+                if (log.isDebugEnabled()) {
+                    Map<String, String> certInfo = preferencePKCS12.getPkcs12().getCertificateInfo();
+                    log.debug("****** certificate thumbprint:   " + certInfo.get("thumbprint"));
+                    log.debug("****** certificate serialNumber: " + certInfo.get("serialNumber"));
+                    log.debug("****** certificate publicKeyPem: " + certInfo.get("publicKeyPem"));
+                }
+                SSLContext sslContext = preferencePKCS12.getPkcs12().getSSLContext();
+                log.info("Successfully setup SSL Context for Aerospike");
+                return sslContext;
+            } catch (KeyNotFoundException | KeyServiceUnavailableException | GeneralSecurityException e) {
+                log.error("Error occurred while setting up the SSL Context to connect to Aerospike: ", e);
+                throw new AerospikeException("SSL Context setup failed", e);
+            }
+        } else {
+            try {
+                log.warn("Preference certificate unavailable, setting up default SSLContext for Aerospike");
+                return SSLContext.getDefault();
+            } catch (NoSuchAlgorithmException n) {
+                log.error("Error occurred while setting up the default SSL Context to connect to Aerospike: ", n);
+                throw new AerospikeException("Default SSL Context setup failed", n);
+            }
+        }
+    }
+
+    @Bean
+    @Profile("!test")
+    @Qualifier(V1_PRIMARY_CLIENT)
+    public AerospikeClient aerospikeV1ClientPrimary(@Qualifier("primaryV1ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_AEROSPIKE_SSL_CONTEXT) SSLContext sslContext,
+                                                    AerospikeClientLogger clientLogger) {
+        // Log callback needs to be setup prior to creating a client. Logger is reused across client instances
+        Log.setCallback(clientLogger);
+        return getAerospikeClient(PolicyBundle.getPolicy(clientProperties, sslContext), clientProperties);
+    }
+
+    @Bean
+    @Profile("!test")
+    @Qualifier(V1_SECONDARY_CLIENT)
+    public AerospikeClient aerospikeV1ClientSecondary(@Qualifier("secondaryV1ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_AEROSPIKE_SSL_CONTEXT) SSLContext sslContext,
+                                                      @Qualifier(V1_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
+        return aerospikeProperties.isUseSingleClientV1() ? aerospikeClient : getAerospikeClient(PolicyBundle.getPolicy(clientProperties, sslContext), clientProperties);
+    }
+
+    @Bean
+    @Profile("!test")
+    @Qualifier(V2_PRIMARY_CLIENT)
+    public AerospikeClient aerospikeV2ClientPrimary(@Qualifier("primaryV2ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_AEROSPIKE_SSL_CONTEXT) SSLContext sslContext) {
+        return getAerospikeClient(PolicyBundle.getPolicy(clientProperties, sslContext), clientProperties);
+    }
+
+    @Bean
+    @Profile("!test")
+    @Qualifier(V2_SECONDARY_CLIENT)
+    public AerospikeClient aerospikeV2ClientSecondary(@Qualifier("secondaryV2ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_AEROSPIKE_SSL_CONTEXT) SSLContext sslContext,
+                                                      @Qualifier(V2_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
+        return aerospikeProperties.isUseSingleClientV2() ? aerospikeClient : getAerospikeClient(PolicyBundle.getPolicy(clientProperties, sslContext), clientProperties);
+    }
+
+    // Client-specific configuration properties
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v1.primary")
+    public AerospikeClientProperties primaryV1ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v1.secondary")
+    public AerospikeClientProperties secondaryV1ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v2.primary")
+    public AerospikeClientProperties primaryV2ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    @Bean
+    @ConfigurationProperties(prefix = "express.aerospike.client.v2.secondary")
+    public AerospikeClientProperties secondaryV2ClientProperties() {
+        return new AerospikeClientProperties();
+    }
+
+    // Create a client logger using either our specified level or our current class level
+    @Bean
+    public AerospikeClientLogger aerospikeClientLogger() {
+        return new AerospikeClientLogger(aerospikeProperties.getClientLogLevel() != null ? aerospikeProperties.getClientLogLevel() : getCurrentRootLevel());
+    }
+
+    protected AerospikeClient getAerospikeClient(ClientPolicy clientPolicy, AerospikeClientProperties clientProperties) {
+        Host host = new Host(clientProperties.getHost(), clientProperties.getPort());
+        String connectInfo = getAerospikeConnectInfo(clientPolicy, clientProperties, host);
+        if (clientProperties.isFailIfNotConnected()) {
+            try {
+                AerospikeClient aerospikeClient = constructAerospikeClient(clientPolicy, host);
+                if (!aerospikeClient.isConnected()) {
+                    throw new AerospikeException("Not connected!");
+                }
+                log.info("Successfully connected to aerospike!  Connect Info: {}", connectInfo);
+                return aerospikeClient;
+            } catch (Exception e) {
+                if (clientProperties.isLdapOnly() || !clientProperties.isFallbackToLdap()) {
+                    log.error("Error occurred while attempting to connect to aerospike.  We will not attempt to try again and will return null.  Connect Info: {}", connectInfo, e);
+                    return null;
+                } else {
+                    log.error("Error occurred while attempting to connect to aerospike.  Will try again using LDAP.  Connect Info: {}", connectInfo, e);
+                    clientPolicy.authMode = AuthMode.EXTERNAL;  //Couldn't connect using certificate, so try to connect using LDAP
+                    connectInfo = getAerospikeConnectInfo(clientPolicy, clientProperties, host);
+                    try {
+                        AerospikeClient aerospikeClient = constructAerospikeClient(clientPolicy, host);
+                        if (!aerospikeClient.isConnected()) {
+                            throw new AerospikeException("Not connected!");
+                        }
+                        log.info("Successfully connected to aerospike, but using LDAP!  Connect Info: {}", connectInfo);
+                        return aerospikeClient;
+                    } catch (Exception e2) {
+                        log.error("Error occurred while attempting to connect to aerospike using LDAP.  We will not attempt to try again and will return null.  Connect Info: {}", connectInfo, e2);
+                        return null;
+                    }
+                }
+            }
+        } else {
+            AerospikeClient aerospikeClient = constructAerospikeClient(clientPolicy, host);
+            if (!aerospikeClient.isConnected() && !clientProperties.isLdapOnly() && clientProperties.isFallbackToLdap()) {
+                log.warn("Connecting to aerospike was not successful.  Will try again using LDAP.  Connect Info: {}", connectInfo);
+                clientPolicy.authMode = AuthMode.EXTERNAL;  //Couldn't connect using certificate, so try to connect using LDAP
+                connectInfo = getAerospikeConnectInfo(clientPolicy, clientProperties, host);
+                aerospikeClient = constructAerospikeClient(clientPolicy, host);
+            }
+            log.info("Connecting to aerospike.  Connected? {}  Connect Info: {}", aerospikeClient.isConnected(), connectInfo);
+            return aerospikeClient;
+        }
+    }
+
+    private String getAerospikeConnectInfo(ClientPolicy clientPolicy, AerospikeClientProperties clientProperties, Host host) {
+        return String.format("'ldapOnly': %b  'fallbackToLdap': %b  host: %s  using auth mode: %s", clientProperties.isLdapOnly(), clientProperties.isFallbackToLdap(), host, clientPolicy.authMode);
+    }
+
+    protected AerospikeClient constructAerospikeClient(ClientPolicy clientPolicy, Host host) {
+        return new AerospikeClient(clientPolicy, host);
+    }
+
+    @Bean
+    public Executor aerospikeExecutor(BeanFactory beanFactory) {
+        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeThreadCount());
+    }
+
+    @Bean("aerospikeTransformerExecutor")
+    public Executor aerospikeTransformerExecutor(BeanFactory beanFactory) {
+        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeTransformerThreadCount());
+    }
+
+    private Log.Level getCurrentRootLevel() {
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isTraceEnabled() || LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isDebugEnabled()) {
+            return Log.Level.DEBUG;
+        }
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isInfoEnabled()) {
+            return Log.Level.INFO;
+        }
+        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isWarnEnabled()) {
+            return Log.Level.WARN;
+        }
+        return Log.Level.ERROR;
+    }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.express.common.config.aerospike;
+
 import com.aerospike.client.policy.*;
+
+import javax.net.ssl.SSLContext;
 
 import static com.schwab.express.common.config.aerospike.AerospikeConstants.PROTOCOL_TLSV12;
 
 public class PolicyBundle {
 
-    public static ClientPolicy getPolicy(AerospikeClientProperties properties) {
+    public static ClientPolicy getPolicy(AerospikeClientProperties properties, SSLContext sslContext) {
         Policy readPolicy = readPolicy(properties);
         BatchPolicy batchPolicy = batchPolicy(properties);
         QueryPolicy queryPolicy = queryPolicy(properties);
-        return getClientPolicy(properties, readPolicy, batchPolicy, queryPolicy);
+        return getClientPolicy(properties, readPolicy, batchPolicy, queryPolicy, sslContext);
     }
 
-    private static ClientPolicy getClientPolicy(AerospikeClientProperties clientProperties, Policy readPolicy, BatchPolicy batchPolicy, QueryPolicy queryPolicy) {
+    private static ClientPolicy getClientPolicy(AerospikeClientProperties clientProperties, Policy readPolicy, BatchPolicy batchPolicy, QueryPolicy queryPolicy, SSLContext sslContext) {
         ClientPolicy clientPolicy = new ClientPolicy();
         clientPolicy.user = clientProperties.getUser();
         clientPolicy.password = clientProperties.getPassword();
@@ -39,6 +297,13 @@ public class PolicyBundle {
         clientPolicy.readPolicyDefault = readPolicy;
         clientPolicy.batchPolicyDefault = batchPolicy;
         clientPolicy.queryPolicyDefault = queryPolicy;
+
+        if (clientProperties.isTlsEnabled() && sslContext != null) {
+            clientPolicy.authMode = clientProperties.isLdapOnly() ? AuthMode.EXTERNAL : AuthMode.PKI;
+            clientPolicy.tlsPolicy = new TlsPolicy();
+            clientPolicy.tlsPolicy.protocols = new String[]{PROTOCOL_TLSV12};
+            clientPolicy.tlsPolicy.context = sslContext;
+        }
 
         return clientPolicy;
     }
@@ -85,212 +350,5 @@ public class PolicyBundle {
         }
 
         return queryPolicy;
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.schwab.express.common.config.aerospike;
-
-import com.aerospike.client.AerospikeClient;
-import com.aerospike.client.AerospikeException;
-import com.aerospike.client.Host;
-import com.aerospike.client.Log;
-import com.aerospike.client.policy.AuthMode;
-import com.aerospike.client.policy.ClientPolicy;
-import com.aerospike.client.policy.TlsPolicy;
-import com.schwab.express.certificate.PreferencePKCS12;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.BeanFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
-
-import javax.net.ssl.SSLContext;
-import java.security.GeneralSecurityException;
-import java.security.NoSuchAlgorithmException;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-
-@Slf4j
-@Configuration
-@AllArgsConstructor
-@ConditionalOnProperty(prefix = "express.aerospike", name = "enabled", havingValue = "true")
-public class AerospikeClientConfiguration {
-
-    private AerospikeProperties aerospikeProperties;
-    private final PreferencePKCS12 preferencePKCS12; // Injecting PreferencePKCS12 here
-    public static final String V1_PRIMARY_CLIENT = "aerospikeClientV1Primary";
-    public static final String V1_SECONDARY_CLIENT = "aerospikeClientV1Secondary";
-    public static final String V2_PRIMARY_CLIENT = "aerospikeClientV2Primary";
-    public static final String V2_SECONDARY_CLIENT = "aerospikeClientV2Secondary";
-
-    @Bean
-    @Profile("!test")
-    @Qualifier(V1_PRIMARY_CLIENT)
-    public AerospikeClient aerospikeV1ClientPrimary(@Qualifier("primaryV1ClientProperties") AerospikeClientProperties clientProperties, AerospikeClientLogger clientLogger) {
-        Log.setCallback(clientLogger);
-        return getAerospikeClient(clientProperties);
-    }
-
-    @Bean
-    @Profile("!test")
-    @Qualifier(V1_SECONDARY_CLIENT)
-    public AerospikeClient aerospikeV1ClientSecondary(@Qualifier("secondaryV1ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V1_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
-        return aerospikeProperties.isUseSingleClientV1() ? aerospikeClient : getAerospikeClient(clientProperties);
-    }
-
-    @Bean
-    @Profile("!test")
-    @Qualifier(V2_PRIMARY_CLIENT)
-    public AerospikeClient aerospikeV2ClientPrimary(@Qualifier("primaryV2ClientProperties") AerospikeClientProperties clientProperties) {
-        return getAerospikeClient(clientProperties);
-    }
-
-    @Bean
-    @Profile("!test")
-    @Qualifier(V2_SECONDARY_CLIENT)
-    public AerospikeClient aerospikeV2ClientSecondary(@Qualifier("secondaryV2ClientProperties") AerospikeClientProperties clientProperties, @Qualifier(V2_PRIMARY_CLIENT) AerospikeClient aerospikeClient) {
-        return aerospikeProperties.isUseSingleClientV2() ? aerospikeClient : getAerospikeClient(clientProperties);
-    }
-
-    // Client-specific configuration properties
-    @Bean
-    @ConfigurationProperties(prefix = "express.aerospike.client.v1.primary")
-    public AerospikeClientProperties primaryV1ClientProperties() {
-        return new AerospikeClientProperties();
-    }
-
-    @Bean
-    @ConfigurationProperties(prefix = "express.aerospike.client.v1.secondary")
-    public AerospikeClientProperties secondaryV1ClientProperties() {
-        return new AerospikeClientProperties();
-    }
-
-    @Bean
-    @ConfigurationProperties(prefix = "express.aerospike.client.v2.primary")
-    public AerospikeClientProperties primaryV2ClientProperties() {
-        return new AerospikeClientProperties();
-    }
-
-    @Bean
-    @ConfigurationProperties(prefix = "express.aerospike.client.v2.secondary")
-    public AerospikeClientProperties secondaryV2ClientProperties() {
-        return new AerospikeClientProperties();
-    }
-
-    // Create a client logger using either our specified level or our current class level
-    @Bean
-    public AerospikeClientLogger aerospikeClientLogger() {
-        return new AerospikeClientLogger(aerospikeProperties.getClientLogLevel() != null ? aerospikeProperties.getClientLogLevel() : getCurrentRootLevel());
-    }
-
-    private AerospikeClient getAerospikeClient(AerospikeClientProperties clientProperties) {
-        ClientPolicy clientPolicy = PolicyBundle.getPolicy(clientProperties);
-        
-        if (preferencePKCS12.isCertificateAvailable()) {
-            try {
-                SSLContext sslContext = preferencePKCS12.getPkcs12().getSSLContext();
-                clientPolicy.authMode = AuthMode.EXTERNAL;
-                clientPolicy.tlsPolicy = new TlsPolicy();
-                clientPolicy.tlsPolicy.protocols = new String[]{AerospikeConstants.PROTOCOL_TLSV12};
-                clientPolicy.tlsPolicy.sslContext = sslContext;
-            } catch (GeneralSecurityException e) {
-                log.error("Error occurred while setting up the SSL Context to connect to Aerospike: ", e);
-                throw new AerospikeException(e);
-            }
-        }
-
-        Host host = new Host(clientProperties.getHost(), clientProperties.getPort());
-        if (clientProperties.isFailIfNotConnected()) {
-            try {
-                return constructAerospikeClient(clientPolicy, host);
-            } catch (Exception e) {
-                if (clientProperties.isLdapOnly() || !clientProperties.isFallbackToLdap()) {
-                    log.error("Error occurred while attempting to connect to Aerospike. We will not attempt to try again and will return null.", e);
-                    return null;
-                } else {
-                    log.error("Error occurred while attempting to connect to Aerospike. Will try again using LDAP.", e);
-                    clientPolicy.authMode = AuthMode.INTERNAL;  // Couldn't connect using certificate, so try to connect using LDAP
-                    try {
-                        return constructAerospikeClient(clientPolicy, host);
-                    } catch (Exception e2) {
-                        log.error("Error occurred while attempting to connect to Aerospike using LDAP. We will not attempt to try again and will return null.", e2);
-                        return null;
-                    }
-                }
-            }
-        } else {
-            return constructAerospikeClient(clientPolicy, host);
-        }
-    }
-
-    private AerospikeClient constructAerospikeClient(ClientPolicy clientPolicy, Host host) {
-        AerospikeClient client = new AerospikeClient(clientPolicy, host);
-        if (!client.isConnected()) {
-            throw new AerospikeException("Not connected!");
-        }
-        return client;
-    }
-
-    @Bean
-    public Executor aerospikeExecutor(BeanFactory beanFactory) {
-        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeThreadCount());
-    }
-
-    @Bean("aerospikeTransformerExecutor")
-    public Executor aerospikeTransformerExecutor(BeanFactory beanFactory) {
-        return Executors.newFixedThreadPool(aerospikeProperties.getAerospikeTransformerThreadCount());
-    }
-
-    private Log.Level getCurrentRootLevel() {
-        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isTraceEnabled() || LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isDebugEnabled()) {
-            return Log.Level.DEBUG;
-        }
-        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isInfoEnabled()) {
-            return Log.Level.INFO;
-        }
-        if (LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isWarnEnabled()) {
-            return Log.Level.WARN;
-        }
-        return Log.Level.ERROR;
     }
 }

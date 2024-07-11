@@ -1,12 +1,27 @@
-input_file = 'your_input_file.txt'  # Replace with your input file name
+input_file = 'test.txt'  # Replace with your input file name
 output_file = 'filtered_output.txt'  # Output file name
 
-with open(input_file, 'r') as file:
-    lines = file.readlines()
+try:
+    with open(input_file, 'r') as file:
+        lines = file.readlines()
+except IOError:
+    print("Error: File does not appear to exist.")
+    exit(1)
 
-filtered_lines = [line for line in lines if line.startswith('- name:')]
+# Print the total number of lines read from the input file
+print("Total number of lines read from the file: {}".format(len(lines)))
 
-with open(output_file, 'w') as file:
-    file.writelines(filtered_lines)
+filtered_lines = [line for line in lines if line.strip().startswith('- name:')]
 
-print("Filtered lines have been saved to {}".format(output_file))
+# Print the number of filtered lines
+print("Number of lines starting with '- name:': {}".format(len(filtered_lines)))
+
+if filtered_lines:
+    try:
+        with open(output_file, 'w') as file:
+            file.writelines(filtered_lines)
+        print("Filtered lines have been saved to {}".format(output_file))
+    except IOError:
+        print("Error: Could not write to output file.")
+else:
+    print("No lines starting with '- name:' found.")

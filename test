@@ -1,10 +1,13 @@
-Sub HighlightMatches()
+Sub HighlightPartialMatches()
     Dim ws As Worksheet
     Dim rngD As Range, rngE As Range
     Dim cellD As Range, cellE As Range
-    Dim matchFound As Boolean
+    Dim countMatches As Integer
     
-    Set ws = ThisWorkbook.Sheets("Sheet1") ' Change Sheet1 to your sheet name
+    ' Set the worksheet to the active sheet
+    Set ws = ThisWorkbook.ActiveSheet
+    
+    ' Define the ranges for column D and column E
     Set rngD = ws.Range("D1:D320")
     Set rngE = ws.Range("E1:E191")
     
@@ -12,16 +15,19 @@ Sub HighlightMatches()
     rngD.Interior.ColorIndex = xlNone
     rngE.Interior.ColorIndex = xlNone
     
+    countMatches = 0
+    
     ' Loop through each cell in column E
     For Each cellE In rngE
-        matchFound = False
         ' Loop through each cell in column D
         For Each cellD In rngD
-            If cellE.Value = cellD.Value And cellE.Value <> "" Then
+            If cellE.Value <> "" And InStr(1, cellD.Value, cellE.Value, vbTextCompare) > 0 Then
                 cellD.Interior.Color = RGB(255, 255, 0) ' Highlight in yellow
                 cellE.Interior.Color = RGB(0, 0, 255) ' Highlight in blue
-                matchFound = True
+                countMatches = countMatches + 1
             End If
         Next cellD
     Next cellE
+    
+    MsgBox countMatches & " matches found and highlighted."
 End Sub

@@ -1,22 +1,27 @@
-input_file = 'filtered_output.txt'  # Replace with your filtered output file name
-output_file = 'cleaned_output.txt'  # Output file name for cleaned lines
-
-try:
-    with open(input_file, 'r') as file:
-        lines = file.readlines()
-except IOError:
-    print("Error: Filtered output file does not appear to exist.")
-    exit(1)
-
-# Remove the '- name:' prefix from each line
-cleaned_lines = [line.replace('- name:', '').strip() + '\n' for line in lines]
-
-# Print the number of cleaned lines
-print("Number of lines cleaned: {}".format(len(cleaned_lines)))
-
-try:
-    with open(output_file, 'w') as file:
-        file.writelines(cleaned_lines)
-    print("Cleaned lines have been saved to {}".format(output_file))
-except IOError:
-    print("Error: Could not write to output file.")
+Sub HighlightMatches()
+    Dim ws As Worksheet
+    Dim rngD As Range, rngE As Range
+    Dim cellD As Range, cellE As Range
+    Dim matchFound As Boolean
+    
+    Set ws = ThisWorkbook.Sheets("Sheet1") ' Change Sheet1 to your sheet name
+    Set rngD = ws.Range("D1:D320")
+    Set rngE = ws.Range("E1:E191")
+    
+    ' Clear any existing formatting
+    rngD.Interior.ColorIndex = xlNone
+    rngE.Interior.ColorIndex = xlNone
+    
+    ' Loop through each cell in column E
+    For Each cellE In rngE
+        matchFound = False
+        ' Loop through each cell in column D
+        For Each cellD In rngD
+            If cellE.Value = cellD.Value And cellE.Value <> "" Then
+                cellD.Interior.Color = RGB(255, 255, 0) ' Highlight in yellow
+                cellE.Interior.Color = RGB(0, 0, 255) ' Highlight in blue
+                matchFound = True
+            End If
+        Next cellD
+    Next cellE
+End Sub

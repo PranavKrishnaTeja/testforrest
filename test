@@ -1,27 +1,22 @@
-input_file = 'test.txt'  # Replace with your input file name
-output_file = 'filtered_output.txt'  # Output file name
+input_file = 'filtered_output.txt'  # Replace with your filtered output file name
+output_file = 'cleaned_output.txt'  # Output file name for cleaned lines
 
 try:
     with open(input_file, 'r') as file:
         lines = file.readlines()
 except IOError:
-    print("Error: File does not appear to exist.")
+    print("Error: Filtered output file does not appear to exist.")
     exit(1)
 
-# Print the total number of lines read from the input file
-print("Total number of lines read from the file: {}".format(len(lines)))
+# Remove the '- name:' prefix from each line
+cleaned_lines = [line.replace('- name:', '').strip() + '\n' for line in lines]
 
-filtered_lines = [line for line in lines if line.strip().startswith('- name:')]
+# Print the number of cleaned lines
+print("Number of lines cleaned: {}".format(len(cleaned_lines)))
 
-# Print the number of filtered lines
-print("Number of lines starting with '- name:': {}".format(len(filtered_lines)))
-
-if filtered_lines:
-    try:
-        with open(output_file, 'w') as file:
-            file.writelines(filtered_lines)
-        print("Filtered lines have been saved to {}".format(output_file))
-    except IOError:
-        print("Error: Could not write to output file.")
-else:
-    print("No lines starting with '- name:' found.")
+try:
+    with open(output_file, 'w') as file:
+        file.writelines(cleaned_lines)
+    print("Cleaned lines have been saved to {}".format(output_file))
+except IOError:
+    print("Error: Could not write to output file.")

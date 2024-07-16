@@ -1,33 +1,9 @@
-Sub HighlightPartialMatches()
-    Dim ws As Worksheet
-    Dim rngD As Range, rngE As Range
-    Dim cellD As Range, cellE As Range
-    Dim countMatches As Integer
-    
-    ' Set the worksheet to the active sheet
-    Set ws = ThisWorkbook.ActiveSheet
-    
-    ' Define the ranges for column D and column E
-    Set rngD = ws.Range("D1:D320")
-    Set rngE = ws.Range("E1:E191")
-    
-    ' Clear any existing formatting
-    rngD.Interior.ColorIndex = xlNone
-    rngE.Interior.ColorIndex = xlNone
-    
-    countMatches = 0
-    
-    ' Loop through each cell in column E
-    For Each cellE In rngE
-        ' Loop through each cell in column D
-        For Each cellD In rngD
-            If cellE.Value <> "" And InStr(1, cellD.Value, cellE.Value, vbTextCompare) > 0 Then
-                cellD.Interior.Color = RGB(255, 255, 0) ' Highlight in yellow
-                cellE.Interior.Color = RGB(0, 0, 255) ' Highlight in blue
-                countMatches = countMatches + 1
-            End If
-        Next cellD
-    Next cellE
-    
-    MsgBox countMatches & " matches found and highlighted."
-End Sub
+Certainly! Here's a more respectful version that highlights the mistakes:
+
+---
+
+I appreciate the effort put into the confluence document. However, I noticed that it does not provide steps for what should be done next. In Mylt, the DataBase service request no longer has a form available. This change is why I raised a ticket. Previously, a form would appear, but it is no longer available after the recent updates, rendering the document outdated.
+
+---
+
+Does this work for you?

@@ -10,14 +10,63 @@ Sub ExtractRowsWithExactName()
     ' Find the last row with data in column A
     lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
     
-    ' Start writing to column D, row 1
+    ' Start writing to row 1 in column D
     destRow = 1
     
     ' Loop through each row in column A
     For i = 1 To lastRow
         If ws.Cells(i, 1).Value = "=- name:" Then
-            ' Copy the entire row to column D
-            ws.Cells(destRow, 4).Value = ws.Cells(i, 1).Value
+            ' Copy the entire row to column D, starting at row 1
+            ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
+            destRow = destRow + 1
+        End If
+    Next i
+End Sub
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Sub ExtractRowsWithExactName()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim destRow As Long
+    
+    ' Change the sheet name if necessary
+    Set ws = ThisWorkbook.Sheets("Sheet1")
+    
+    ' Find the last row with data in column A
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    
+    ' Start writing to row 1 in column D
+    destRow = 1
+    
+    ' Loop through each row in column A
+    For i = 1 To lastRow
+        If Trim(ws.Cells(i, 1).Value) = "=- name:" Then
+            ' Copy the entire row to column D, starting at row 1
+            ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
             destRow = destRow + 1
         End If
     Next i

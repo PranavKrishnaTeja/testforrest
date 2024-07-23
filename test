@@ -1,32 +1,23 @@
-Sub ExtractRowsWithName()
+Sub ProcessAndMoveData()
     Dim ws As Worksheet
     Dim lastRow As Long
     Dim i As Long
-    Dim destRow As Long
-    Dim destCol As Long
+    Dim cellValue As String
     
     ' Change the sheet name if necessary
     Set ws = ThisWorkbook.Sheets("Sheet1")
     
-    ' Find the last row with data in column A
-    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    ' Find the last row with data in column D
+    lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
     
-    ' Start writing to column D
-    destRow = 1
-    
-    ' Loop through each row in column A
+    ' Loop through each row in column D
     For i = 1 To lastRow
-        If Left(CStr(Trim(ws.Cells(i, 1).Value)), 7) = "- name:" Then
-            destCol = 4 ' Start at column D
-            
-            ' Copy each cell in the row to consecutive rows in column D
-            For j = 1 To ws.Columns.Count
-                If ws.Cells(i, j).Value <> "" Then
-                    ws.Cells(destRow, destCol).Value = ws.Cells(i, j).Value
-                    destRow = destRow + 1
-                End If
-            Next j
+        cellValue = ws.Cells(i, 4).Value ' Read the value from column D
+        If Left(CStr(Trim(cellValue)), 7) = "- name:" Then
+            ' Remove the prefix "- name:" if it exists
+            cellValue = Mid(cellValue, 8)
         End If
+        ws.Cells(i, 1).Value = cellValue ' Write the modified value to column A
     Next i
     
     ' Display a message to indicate the macro has finished

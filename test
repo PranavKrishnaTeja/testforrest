@@ -1,25 +1,19 @@
-Sub ProcessAndMoveData()
+Sub MatchAndMove()
     Dim ws As Worksheet
-    Dim lastRow As Long
+    Set ws = ThisWorkbook.Sheets("Sheet1") ' Change to your sheet name
+    
+    Dim lastRowF As Long
+    Dim lastRowG As Long
     Dim i As Long
-    Dim cellValue As String
+    Dim matchRow As Variant
     
-    ' Change the sheet name if necessary
-    Set ws = ThisWorkbook.Sheets("Sheet1")
+    lastRowF = 196 ' Assuming 196 rows in column F
+    lastRowG = 195 ' Assuming 195 rows in column G
     
-    ' Find the last row with data in column D
-    lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
-    
-    ' Loop through each row in column D
-    For i = 1 To lastRow
-        cellValue = ws.Cells(i, 4).Value ' Read the value from column D
-        If Left(CStr(Trim(cellValue)), 8) = "- name: " Then
-            ' Remove the prefix "- name: " if it exists
-            cellValue = Mid(cellValue, 9)
+    For i = 1 To lastRowF
+        matchRow = Application.Match(ws.Cells(i, "F").Value, ws.Range("G1:G" & lastRowG), 0)
+        If Not IsError(matchRow) Then
+            ws.Cells(i, "E").Value = ws.Cells(matchRow, "G").Value
         End If
-        ws.Cells(i, 1).Value = cellValue ' Write the modified value to column A
     Next i
-    
-    ' Display a message to indicate the macro has finished
-    MsgBox "Macro has finished running."
 End Sub

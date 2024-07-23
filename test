@@ -1,4 +1,4 @@
-Sub ExtractRowsWithExactName()
+Sub ExtractRowsWithName()
     Dim ws As Worksheet
     Dim lastRow As Long
     Dim i As Long
@@ -13,17 +13,12 @@ Sub ExtractRowsWithExactName()
     ' Start writing to row 1 in column D
     destRow = 1
     
-    ' Display a message to indicate the macro is starting
-    MsgBox "Macro is starting. Last row in column A is: " & lastRow
-    
     ' Loop through each row in column A
     For i = 1 To lastRow
-        If CStr(Trim(ws.Cells(i, 1).Value)) = "=- name:" Then
+        If Left(CStr(Trim(ws.Cells(i, 1).Value)), 7) = "- name:" Then
             ' Copy the entire row to column D, starting at row 1
             ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
             destRow = destRow + 1
-            ' Display a message to indicate a row was copied
-            MsgBox "Row " & i & " copied to row " & destRow - 1
         End If
     Next i
     

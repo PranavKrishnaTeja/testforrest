@@ -17,7 +17,8 @@ Sub ExtractRowsWithName()
     For i = 1 To lastRow
         If Left(CStr(Trim(ws.Cells(i, 1).Value)), 7) = "- name:" Then
             ' Copy the entire row to column D, starting at row 1
-            ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
+            ws.Rows(i).Copy
+            ws.Cells(destRow, 4).PasteSpecial Paste:=xlPasteAll
             destRow = destRow + 1
         End If
     Next i

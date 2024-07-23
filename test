@@ -1,25 +1,28 @@
 Sub MatchAndMove()
     Dim ws As Worksheet
     Set ws = ThisWorkbook.Sheets("Sheet1") ' Change to your sheet name
-    
+
     Dim lastRowF As Long
     Dim lastRowG As Long
     Dim i As Long
     Dim cell As Range
     Dim searchValue As String
     Dim partOfG As String
-    
-    lastRowF = 196 ' Number of rows in column F
-    lastRowG = 195 ' Number of rows in column G
+
+    ' Find the last rows in columns F and G
+    lastRowF = ws.Cells(ws.Rows.Count, "F").End(xlUp).Row
+    lastRowG = ws.Cells(ws.Rows.Count, "G").End(xlUp).Row
     
     ' Debug point to confirm the macro starts
     Debug.Print "Starting MatchAndMove macro"
-    
+    Debug.Print "Last row in F: " & lastRowF
+    Debug.Print "Last row in G: " & lastRowG
+
     For i = 1 To lastRowF
         searchValue = ws.Cells(i, "F").Value
         ' Debug point to print the current search value
         Debug.Print "Searching for: " & searchValue
-        
+
         For Each cell In ws.Range("G1:G" & lastRowG)
             ' Extract part of G before any space, or use the whole cell if no space is found
             If InStr(cell.Value, " ") > 0 Then
@@ -27,10 +30,10 @@ Sub MatchAndMove()
             Else
                 partOfG = cell.Value
             End If
-            
+
             ' Debug point to print the current cell value being compared
             Debug.Print "Comparing with: " & partOfG
-            
+
             If searchValue = partOfG Then
                 ws.Cells(i, "E").Value = cell.Value
                 ' Debug point to confirm a match was found and the value was moved
@@ -39,7 +42,7 @@ Sub MatchAndMove()
             End If
         Next cell
     Next i
-    
+
     ' Debug point to confirm the macro ends
     Debug.Print "MatchAndMove macro completed"
 End Sub

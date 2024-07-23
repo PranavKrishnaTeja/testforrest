@@ -3,6 +3,7 @@ Sub ExtractRowsWithName()
     Dim lastRow As Long
     Dim i As Long
     Dim destRow As Long
+    Dim j As Long
     
     ' Change the sheet name if necessary
     Set ws = ThisWorkbook.Sheets("Sheet1")
@@ -16,9 +17,10 @@ Sub ExtractRowsWithName()
     ' Loop through each row in column A
     For i = 1 To lastRow
         If Left(CStr(Trim(ws.Cells(i, 1).Value)), 7) = "- name:" Then
-            ' Copy the entire row to column D, starting at row 1
-            ws.Rows(i).Copy
-            ws.Cells(destRow, 4).PasteSpecial Paste:=xlPasteAll
+            ' Copy each cell in the row to the destination row in column D
+            For j = 1 To ws.Columns.Count
+                ws.Cells(destRow, j + 3).Value = ws.Cells(i, j).Value
+            Next j
             destRow = destRow + 1
         End If
     Next i

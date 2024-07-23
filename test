@@ -7,8 +7,8 @@ Sub MatchAndMove()
     Dim i As Long
     Dim matchRow As Variant
     
-    lastRowF = 196 ' Assuming 196 rows in column F
-    lastRowG = 195 ' Assuming 195 rows in column G
+    lastRowF = 196 ' Number of rows in column F
+    lastRowG = 195 ' Number of rows in column G
     
     For i = 1 To lastRowF
         matchRow = Application.Match(ws.Cells(i, "F").Value, ws.Range("G1:G" & lastRowG), 0)

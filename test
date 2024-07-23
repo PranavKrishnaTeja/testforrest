@@ -13,9 +13,9 @@ Sub ProcessAndMoveData()
     ' Loop through each row in column D
     For i = 1 To lastRow
         cellValue = ws.Cells(i, 4).Value ' Read the value from column D
-        If Left(CStr(Trim(cellValue)), 7) = "- name:" Then
-            ' Remove the prefix "- name:" if it exists
-            cellValue = Mid(cellValue, 8)
+        If Left(CStr(Trim(cellValue)), 8) = "- name: " Then
+            ' Remove the prefix "- name: " if it exists
+            cellValue = Mid(cellValue, 9)
         End If
         ws.Cells(i, 1).Value = cellValue ' Write the modified value to column A
     Next i

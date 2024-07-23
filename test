@@ -5,15 +5,41 @@ Sub MatchAndMove()
     Dim lastRowF As Long
     Dim lastRowG As Long
     Dim i As Long
-    Dim matchRow As Variant
+    Dim cell As Range
+    Dim searchValue As String
+    Dim partOfG As String
     
     lastRowF = 196 ' Number of rows in column F
     lastRowG = 195 ' Number of rows in column G
     
+    ' Debug point to confirm the macro starts
+    Debug.Print "Starting MatchAndMove macro"
+    
     For i = 1 To lastRowF
-        matchRow = Application.Match(ws.Cells(i, "F").Value, ws.Range("G1:G" & lastRowG), 0)
-        If Not IsError(matchRow) Then
-            ws.Cells(i, "E").Value = ws.Cells(matchRow, "G").Value
-        End If
+        searchValue = ws.Cells(i, "F").Value
+        ' Debug point to print the current search value
+        Debug.Print "Searching for: " & searchValue
+        
+        For Each cell In ws.Range("G1:G" & lastRowG)
+            ' Extract part of G before any space, or use the whole cell if no space is found
+            If InStr(cell.Value, " ") > 0 Then
+                partOfG = Trim(Left(cell.Value, InStr(cell.Value, " ") - 1))
+            Else
+                partOfG = cell.Value
+            End If
+            
+            ' Debug point to print the current cell value being compared
+            Debug.Print "Comparing with: " & partOfG
+            
+            If searchValue = partOfG Then
+                ws.Cells(i, "E").Value = cell.Value
+                ' Debug point to confirm a match was found and the value was moved
+                Debug.Print "Match found. Moved: " & cell.Value & " to E" & i
+                Exit For
+            End If
+        Next cell
     Next i
+    
+    ' Debug point to confirm the macro ends
+    Debug.Print "MatchAndMove macro completed"
 End Sub

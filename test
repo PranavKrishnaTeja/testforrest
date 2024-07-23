@@ -13,61 +13,20 @@ Sub ExtractRowsWithExactName()
     ' Start writing to row 1 in column D
     destRow = 1
     
-    ' Loop through each row in column A
-    For i = 1 To lastRow
-        If ws.Cells(i, 1).Value = "=- name:" Then
-            ' Copy the entire row to column D, starting at row 1
-            ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
-            destRow = destRow + 1
-        End If
-    Next i
-End Sub
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Sub ExtractRowsWithExactName()
-    Dim ws As Worksheet
-    Dim lastRow As Long
-    Dim i As Long
-    Dim destRow As Long
-    
-    ' Change the sheet name if necessary
-    Set ws = ThisWorkbook.Sheets("Sheet1")
-    
-    ' Find the last row with data in column A
-    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-    
-    ' Start writing to row 1 in column D
-    destRow = 1
+    ' Display a message to indicate the macro is starting
+    MsgBox "Macro is starting. Last row in column A is: " & lastRow
     
     ' Loop through each row in column A
     For i = 1 To lastRow
-        If Trim(ws.Cells(i, 1).Value) = "=- name:" Then
+        If CStr(Trim(ws.Cells(i, 1).Value)) = "=- name:" Then
             ' Copy the entire row to column D, starting at row 1
             ws.Rows(i).Copy Destination:=ws.Cells(destRow, 4)
             destRow = destRow + 1
+            ' Display a message to indicate a row was copied
+            MsgBox "Row " & i & " copied to row " & destRow - 1
         End If
     Next i
+    
+    ' Display a message to indicate the macro has finished
+    MsgBox "Macro has finished running. " & destRow - 1 & " rows copied."
 End Sub

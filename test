@@ -1,25 +1,88 @@
-Sub RemoveLeadingSpaces()
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets("Sheet1") ' Change to your sheet name
-    
-    Dim lastRowG As Long
-    Dim i As Long
-    
-    ' Find the last row in column G
-    lastRowG = ws.Cells(ws.Rows.Count, "G").End(xlUp).Row
-    
-    ' Debug point to confirm the macro starts
-    Debug.Print "Starting RemoveLeadingSpaces macro"
-    Debug.Print "Last row in G: " & lastRowG
-    
-    For i = 1 To lastRowG
-        If Len(ws.Cells(i, "G").Value) >= 4 Then
-            ws.Cells(i, "G").Value = Mid(ws.Cells(i, "G").Value, 5)
-        End If
-        ' Debug point to confirm spaces removed
-        Debug.Print "Row " & i & " updated: " & ws.Cells(i, "G").Value
-    Next i
-    
-    ' Debug point to confirm the macro ends
-    Debug.Print "RemoveLeadingSpaces macro completed"
-End Sub
+package com.schwab.cdt.spos.source.job;
+
+import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.runner.RunWith;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.test.JobLauncherTestUtils;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.junit4.SpringRunner;
+
+import java.time.LocalDateTime;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@RunWith(SpringRunner.class)
+@SpringBatchTest
+@SpringBootTest
+@ActiveProfiles("test")
+public class DataIngestionJobTest {
+
+    @Autowired
+    private JobLauncherTestUtils jobLauncherTestUtils;
+
+    @Autowired
+    private DataIngestionJobBuilder dataIngestionJobBuilder;
+
+    @Configuration
+    @EnableBatchProcessing
+    static class TestConfig {
+
+        @Autowired
+        private DataIngestionStepBuilder dataIngestionStepBuilder;
+
+        @Autowired
+        private JobRepository jobRepository;
+
+        @Autowired
+        private DataIngestionJobListener dataIngestionJobListener;
+
+        @Bean(name = "postgresDataIngestionJob")
+        public Job postgresDataIngestionJob() {
+            return new DataIngestionJobBuilder(dataIngestionStepBuilder, jobRepository, dataIngestionJobListener)
+                    .postgresDataIngestionJob();
+        }
+
+        @Bean(name = "cassandraDataIngestionJob")
+        public Job cassandraDataIngestionJob() {
+            return new DataIngestionJobBuilder(dataIngestionStepBuilder, jobRepository, dataIngestionJobListener)
+                    .cassandraDataIngestionJob();
+        }
+    }
+
+    @BeforeEach
+    public void setUp() {
+        jobLauncherTestUtils.setJob(dataIngestionJobBuilder.postgresDataIngestionJob());
+    }
+
+    @Test
+    public void testPostgresDataIngestionJob() throws Exception {
+        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
+        jobParametersBuilder.addString("documentId", "householdingbalances_test_doc_id");
+        jobParametersBuilder.addString("startTime", LocalDateTime.now().toString());
+
+        JobExecution jobExecution = jobLauncherTestUtils.launchJob(jobParametersBuilder.toJobParameters());
+        assertEquals("COMPLETED", jobExecution.getStatus().toString());
+    }
+
+    @Test
+    public void testCassandraDataIngestionJob() throws Exception {
+        jobLauncherTestUtils.setJob(dataIngestionJobBuilder.cassandraDataIngestionJob());
+
+        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
+        jobParametersBuilder.addString("documentId", "affiliateaccount_test_doc_id");
+        jobParametersBuilder.addString("startTime", LocalDateTime.now().toString());
+
+        JobExecution jobExecution = jobLauncherTestUtils.launchJob(jobParametersBuilder.toJobParameters());
+        assertEquals("COMPLETED", jobExecution.getStatus().toString());
+    }
+}

@@ -1,70 +1,341 @@
+// src/test/java/com/schwab/cdt/spos/source/job/DataIngestionJobTestConfig.java
+
+package com.schwab.cdt.spos.source.job;
+
+import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
+import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
+import com.schwab.cdt.spos.source.job.step.processor.SposItemProcessor;
+import com.schwab.cdt.spos.source.job.step.writer.PostgresItemWriter;
+import com.schwab.cdt.spos.source.job.step.writer.CassandraItemWriter;
+import com.schwab.cdt.spos.source.service.BatchService;
+import com.schwab.cdt.spos.source.config.LoggingConfig;
+import com.schwab.cdt.spos.source.config.ArcataConfig;
+import com.schwab.cdt.spos.source.config.SposConfig;
+import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.test.JobLauncherTestUtils;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+
+@SpringBatchTest
+@TestConfiguration
+@EnableBatchProcessing
+@Import({DataIngestionJobBuilder.class, DataIngestionStepBuilder.class, SposItemReader.class, SposItemProcessor.class, PostgresItemWriter.class, CassandraItemWriter.class, BatchService.class, LoggingConfig.class, ArcataConfig.class, SposConfig.class, CassandraConfig.class})
+public class DataIngestionJobTestConfig {
+
+    @Bean
+    public JobLauncherTestUtils jobLauncherTestUtils() {
+        return new JobLauncherTestUtils();
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/DataIngestionJobTest.java
+
+package com.schwab.cdt.spos.source.job;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.test.JobLauncherTestUtils;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@ExtendWith(SpringExtension.class)
+@SpringBatchTest
+@SpringBootTest(classes = {DataIngestionJobTestConfig.class})
+public class DataIngestionJobTest {
+
+    @Autowired
+    private JobLauncherTestUtils jobLauncherTestUtils;
+
+    @Autowired
+    private Job postgresDataIngestionJob;
+
+    @Test
+    public void testPostgresDataIngestionJob() throws Exception {
+        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
+        jobParametersBuilder.addString("documentId", "test_document.avro");
+        jobParametersBuilder.addLong("startTime", System.currentTimeMillis());
+
+        JobExecution jobExecution = jobLauncherTestUtils.getJobLauncher().run(postgresDataIngestionJob, jobParametersBuilder.toJobParameters());
+
+        assertNotNull(jobExecution);
+        assertEquals("COMPLETED", jobExecution.getExitStatus().getExitCode());
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/DataIngestionStepTest.java
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import com.schwab.cdt.spos.source.config.SposConfig;
+import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
+import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
+import com.schwab.cdt.spos.source.job.step.processor.SposItemProcessor;
+import com.schwab.cdt.spos.source.job.step.writer.PostgresItemWriter;
+import com.schwab.cdt.spos.source.job.step.writer.CassandraItemWriter;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.StepSynchronizationManager;
+import org.springframework.batch.test.MetaDataInstanceFactory;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@ExtendWith(MockitoExtension.class)
+@SpringBatchTest
+@SpringBootTest(classes = {DataIngestionStepBuilder.class, SposItemReader.class, SposItemProcessor.class, PostgresItemWriter.class, CassandraItemWriter.class, SposConfig.class, CassandraConfig.class})
+public class DataIngestionStepTest {
+
+    @Autowired
+    private DataIngestionStepBuilder dataIngestionStepBuilder;
+
+    @Mock
+    private AggregateFactory.Aggregate aggregate;
+
+    @Test
+    public void testPostgresDataIngestionStep() throws Exception {
+        Step postgresDataIngestionStep = dataIngestionStepBuilder.postgresDataIngestionStep();
+        StepExecution stepExecution = MetaDataInstanceFactory.createStepExecution();
+
+        StepContext stepContext = StepSynchronizationManager.register(stepExecution);
+        stepContext.getStepExecution().getExecutionContext().put("aggregate", aggregate);
+
+        when(aggregate.name()).thenReturn("test");
+
+        postgresDataIngestionStep.execute(stepExecution);
+
+        assertEquals("COMPLETED", stepExecution.getExitStatus().getExitCode());
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/reader/SposItemReaderTest.java
+
 package com.schwab.cdt.spos.source.job.step.reader;
 
-import com.schwab.cdt.spos.source.service.StreamService;
 import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import schwab.discovery.client.EndpointNotFoundException;
+import schwab.discovery.client.ServiceRegistryException;
 
-import java.io.PipedInputStream;
+import java.io.IOException;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+@SpringBootTest
 public class SposItemReaderTest {
 
-    private SposItemReader sposItemReader;
-
-    @Mock
+    @Autowired
     private SposStreamingClient sposStreamingClient;
 
-    @Mock
-    private StreamService streamService;
-
-    private PipedInputStream pipedInputStream;
-
-    @Mock
-    private DataFileStream<GenericRecord> dataFileStream;
-
-    @BeforeEach
-    public void setUp() throws Exception {
-        MockitoAnnotations.openMocks(this);
-        pipedInputStream = new PipedInputStream();
-        sposItemReader = new SposItemReader(sposStreamingClient, "test-documentId");
-        dataFileStream = mock(DataFileStream.class);
+    @Test
+    public void testSposItemReader() throws EndpointNotFoundException, ServiceRegistryException, IOException {
+        ItemReader<GenericRecord> reader = new SposItemReader(sposStreamingClient, "test_document.avro");
+        GenericRecord record = reader.read();
+        assertNotNull(record);
     }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/processor/SposItemProcessorTest.java
+
+package com.schwab.cdt.spos.source.job.step.processor;
+
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import org.apache.avro.generic.GenericRecord;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@SpringBootTest
+public class SposItemProcessorTest {
+
+    @Autowired
+    private ItemProcessor<GenericRecord, AggregateFactory.Aggregate> sposItemProcessor;
+
+    @Mock
+    private GenericRecord genericRecord;
+
+    @Mock
+    private AggregateFactory aggregateFactory;
 
     @Test
-    public void testDoOpen() throws Exception {
-        Thread thread = new Thread(sposItemReader.streamService);
-        thread.start();
-        sposItemReader.open(new ExecutionContext());
-        assertNotNull(sposItemReader.dataFileStream);
-    }
-
-    @Test
-    public void testDoRead() throws Exception {
-        when(dataFileStream.hasNext()).thenReturn(true, false);
-        when(dataFileStream.next()).thenReturn(mock(GenericRecord.class));
-
-        sposItemReader.dataFileStream = dataFileStream;
-
-        GenericRecord result = sposItemReader.read();
+    public void testProcess() throws Exception {
+        when(genericRecord.get("someField")).thenReturn("someValue");
+        AggregateFactory.Aggregate result = sposItemProcessor.process(genericRecord);
         assertNotNull(result);
-
-        result = sposItemReader.read();
-        assertNull(result);
     }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/writer/PostgresItemWriterTest.java
+
+package com.schwab.cdt.spos.source.job.step.writer;
+
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.springframework.batch.item.Chunk;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;
+
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+
+@SpringBootTest
+public class PostgresItemWriterTest {
+
+    @Autowired
+    private NamedParameterJdbcOperations jdbcTemplate;
 
     @Test
-    public void testDoClose() throws Exception {
-        sposItemReader.dataFileStream = dataFileStream;
-        sposItemReader.close();
-        verify(dataFileStream, times(1)).close();
+    public void testWrite() {
+        PostgresItemWriter writer = new PostgresItemWriter(jdbcTemplate);
+        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(new AggregateFactory.Aggregate("test", null, null, "INSERT INTO test VALUES (?)")));
+        assertDoesNotThrow(() -> writer.write(chunk));
     }
 }

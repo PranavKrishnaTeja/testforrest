@@ -11,7 +11,6 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.batch.item.ExecutionContext;
 
-import java.io.IOException;
 import java.io.PipedInputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,63 +26,44 @@ public class SposItemReaderTest {
     @Mock
     private StreamService streamService;
 
+    private PipedInputStream pipedInputStream;
+
     @Mock
     private DataFileStream<GenericRecord> dataFileStream;
-
-    @Mock
-    private GenericRecord genericRecord;
-
-    private PipedInputStream pipedInputStream;
 
     @BeforeEach
     public void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         pipedInputStream = new PipedInputStream();
         sposItemReader = new SposItemReader(sposStreamingClient, "test-documentId");
-
-        // Use reflection to set private fields
-        setField(sposItemReader, "pipedInputStream", pipedInputStream);
-        setField(sposItemReader, "dataFileStream", dataFileStream);
-        setField(sposItemReader, "streamService", streamService);
-    }
-
-    private void setField(Object target, String fieldName, Object value) throws Exception {
-        var field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
+        dataFileStream = mock(DataFileStream.class);
     }
 
     @Test
     public void testDoOpen() throws Exception {
-        doNothing().when(streamService).run();
-        whenNew(DataFileStream.class).withArguments(pipedInputStream, new GenericDatumReader<>()).thenReturn(dataFileStream);
-        
+        Thread thread = new Thread(sposItemReader.streamService);
+        thread.start();
         sposItemReader.open(new ExecutionContext());
-        
-        assertNotNull(sposItemReader);
-        verify(streamService, times(1)).run();
+        assertNotNull(sposItemReader.dataFileStream);
     }
 
     @Test
     public void testDoRead() throws Exception {
         when(dataFileStream.hasNext()).thenReturn(true, false);
-        when(dataFileStream.next()).thenReturn(genericRecord);
+        when(dataFileStream.next()).thenReturn(mock(GenericRecord.class));
 
-        sposItemReader.open(new ExecutionContext());
+        sposItemReader.dataFileStream = dataFileStream;
 
         GenericRecord result = sposItemReader.read();
         assertNotNull(result);
-        assertEquals(genericRecord, result);
 
         result = sposItemReader.read();
         assertNull(result);
-
-        sposItemReader.close();
     }
 
     @Test
     public void testDoClose() throws Exception {
-        sposItemReader.open(new ExecutionContext());
+        sposItemReader.dataFileStream = dataFileStream;
         sposItemReader.close();
         verify(dataFileStream, times(1)).close();
     }

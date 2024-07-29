@@ -29,3 +29,131 @@ public class TestConfig {
                 "uddi:schwab.com:service:sch.core.enterpriseStorage.SPOSStorageService", "SposS3Port", "schwab", "Client Data Management");
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/DataIngestionJobTest.java
+
+package com.schwab.cdt.spos.source.job;
+
+import com.schwab.cdt.spos.source.config.TestConfig;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.test.JobLauncherTestUtils;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@ExtendWith(SpringExtension.class)
+@SpringBatchTest
+@SpringBootTest(classes = {DataIngestionJobTestConfig.class, TestConfig.class})
+public class DataIngestionJobTest {
+
+    @Autowired
+    private JobLauncherTestUtils jobLauncherTestUtils;
+
+    @Autowired
+    private Job postgresDataIngestionJob;
+
+    @Test
+    public void testPostgresDataIngestionJob() throws Exception {
+        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
+        jobParametersBuilder.addString("documentId", "test_document.avro");
+        jobParametersBuilder.addLong("startTime", System.currentTimeMillis());
+
+        JobExecution jobExecution = jobLauncherTestUtils.getJobLauncher().run(postgresDataIngestionJob, jobParametersBuilder.toJobParameters());
+
+        assertNotNull(jobExecution);
+        assertEquals("COMPLETED", jobExecution.getExitStatus().getExitCode());
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/DataIngestionStepTest.java
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.config.TestConfig;
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.StepSynchronizationManager;
+import org.springframework.batch.test.MetaDataInstanceFactory;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@ExtendWith(MockitoExtension.class)
+@SpringBatchTest
+@SpringBootTest(classes = {DataIngestionStepBuilder.class, TestConfig.class})
+public class DataIngestionStepTest {
+
+    @Autowired
+    private DataIngestionStepBuilder dataIngestionStepBuilder;
+
+    @Mock
+    private AggregateFactory.Aggregate aggregate;
+
+    @Test
+    public void testPostgresDataIngestionStep() throws Exception {
+        Step postgresDataIngestionStep = dataIngestionStepBuilder.postgresDataIngestionStep();
+        StepExecution stepExecution = MetaDataInstanceFactory.createStepExecution();
+
+        StepContext stepContext = StepSynchronizationManager.register(stepExecution);
+        stepContext.getStepExecution().getExecutionContext().put("aggregate", aggregate);
+
+        when(aggregate.name()).thenReturn("test");
+
+        postgresDataIngestionStep.execute(stepExecution);
+
+        assertEquals("COMPLETED", stepExecution.getExitStatus().getExitCode());
+    }
+}

@@ -1,88 +1,77 @@
-package com.schwab.cdt.spos.source.job;
+package com.schwab.cdt.spos.source.job.step.reader;
 
-import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
+import com.schwab.cdt.spos.source.service.StreamService;
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.runner.RunWith;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.test.JobLauncherTestUtils;
-import org.springframework.batch.test.context.SpringBatchTest;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.junit4.SpringRunner;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.item.ExecutionContext;
 
-import java.time.LocalDateTime;
+import java.io.PipedInputStream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
-@RunWith(SpringRunner.class)
-@SpringBatchTest
-@SpringBootTest
-@ActiveProfiles("test")
-public class DataIngestionJobTest {
+public class SposItemReaderTest {
 
-    @Autowired
-    private JobLauncherTestUtils jobLauncherTestUtils;
+    private SposItemReader sposItemReader;
 
-    @Autowired
-    private DataIngestionJobBuilder dataIngestionJobBuilder;
+    @Mock
+    private SposStreamingClient sposStreamingClient;
 
-    @Configuration
-    @EnableBatchProcessing
-    static class TestConfig {
+    @Mock
+    private DataFileStream<GenericRecord> dataFileStream;
 
-        @Autowired
-        private DataIngestionStepBuilder dataIngestionStepBuilder;
+    @Mock
+    private StreamService streamService;
 
-        @Autowired
-        private JobRepository jobRepository;
-
-        @Autowired
-        private DataIngestionJobListener dataIngestionJobListener;
-
-        @Bean(name = "postgresDataIngestionJob")
-        public Job postgresDataIngestionJob() {
-            return new DataIngestionJobBuilder(dataIngestionStepBuilder, jobRepository, dataIngestionJobListener)
-                    .postgresDataIngestionJob();
-        }
-
-        @Bean(name = "cassandraDataIngestionJob")
-        public Job cassandraDataIngestionJob() {
-            return new DataIngestionJobBuilder(dataIngestionStepBuilder, jobRepository, dataIngestionJobListener)
-                    .cassandraDataIngestionJob();
-        }
-    }
+    private PipedInputStream pipedInputStream;
 
     @BeforeEach
-    public void setUp() {
-        jobLauncherTestUtils.setJob(dataIngestionJobBuilder.postgresDataIngestionJob());
+    public void setUp() throws Exception {
+        MockitoAnnotations.openMocks(this);
+        pipedInputStream = mock(PipedInputStream.class);
+        sposItemReader = spy(new SposItemReader(sposStreamingClient, "test-documentId"));
+
+        // Use reflection to set the pipedInputStream and dataFileStream fields
+        var pipedInputStreamField = SposItemReader.class.getDeclaredField("pipedInputStream");
+        pipedInputStreamField.setAccessible(true);
+        pipedInputStreamField.set(sposItemReader, pipedInputStream);
+
+        var dataFileStreamField = SposItemReader.class.getDeclaredField("dataFileStream");
+        dataFileStreamField.setAccessible(true);
+        dataFileStreamField.set(sposItemReader, dataFileStream);
     }
 
     @Test
-    public void testPostgresDataIngestionJob() throws Exception {
-        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
-        jobParametersBuilder.addString("documentId", "householdingbalances_test_doc_id");
-        jobParametersBuilder.addString("startTime", LocalDateTime.now().toString());
-
-        JobExecution jobExecution = jobLauncherTestUtils.launchJob(jobParametersBuilder.toJobParameters());
-        assertEquals("COMPLETED", jobExecution.getStatus().toString());
+    public void testDoOpen() throws Exception {
+        doNothing().when(streamService).run();
+        sposItemReader.open(new ExecutionContext());
+        assertNotNull(sposItemReader);
+        verify(sposItemReader, times(1)).open(any());
     }
 
     @Test
-    public void testCassandraDataIngestionJob() throws Exception {
-        jobLauncherTestUtils.setJob(dataIngestionJobBuilder.cassandraDataIngestionJob());
+    public void testDoRead() throws Exception {
+        GenericRecord record = mock(GenericRecord.class);
+        when(dataFileStream.hasNext()).thenReturn(true, false);
+        when(dataFileStream.next()).thenReturn(record);
 
-        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
-        jobParametersBuilder.addString("documentId", "affiliateaccount_test_doc_id");
-        jobParametersBuilder.addString("startTime", LocalDateTime.now().toString());
+        GenericRecord result = sposItemReader.read();
+        assertNotNull(result);
+        assertEquals(record, result);
 
-        JobExecution jobExecution = jobLauncherTestUtils.launchJob(jobParametersBuilder.toJobParameters());
-        assertEquals("COMPLETED", jobExecution.getStatus().toString());
+        result = sposItemReader.read();
+        assertNull(result);
+    }
+
+    @Test
+    public void testDoClose() throws Exception {
+        sposItemReader.close();
+        verify(dataFileStream, times(1)).close();
     }
 }

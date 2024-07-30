@@ -2,19 +2,58 @@
 
 package com.schwab.cdt.spos.source.config;
 
+import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
+import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
+import com.schwab.cdt.spos.source.job.step.processor.SposItemProcessor;
+import com.schwab.cdt.spos.source.job.step.writer.PostgresItemWriter;
+import com.schwab.cdt.spos.source.job.step.writer.CassandraItemWriter;
+import org.mockito.Mockito;
+import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
+import org.springframework.batch.item.ItemWriter;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.batch.test.context.SpringBatchTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.context.annotation.Profile;
 
-@SpringBatchTest
 @TestConfiguration
-@Import(DataSourceAutoConfiguration.class)
+@EnableBatchProcessing
+@Import({MainConfig.class})  // Import the main configuration to reuse the beans
 public class TestConfig {
-    // Include any specific test beans here, if necessary.
+
+    @Bean
+    @Primary
+    @Profile("test")
+    public ItemWriter<AggregateFactory.Aggregate> postgresItemWriter() {
+        return Mockito.mock(PostgresItemWriter.class);
+    }
+
+    @Bean
+    @Primary
+    @Profile("test")
+    public ItemWriter<AggregateFactory.Aggregate> cassandraItemWriter() {
+        return Mockito.mock(CassandraItemWriter.class);
+    }
+
+    @Bean
+    @Primary
+    @Profile("test")
+    public SposItemReader sposItemReader() {
+        return Mockito.mock(SposItemReader.class);
+    }
+
+    @Bean
+    @Primary
+    @Profile("test")
+    public SposItemProcessor sposItemProcessor() {
+        return Mockito.mock(SposItemProcessor.class);
+    }
 }
+
+
+
+
+
 
 
 
@@ -70,10 +109,6 @@ public class DataIngestionJobTest {
         assertEquals("COMPLETED", jobExecution.getExitStatus().getExitCode());
     }
 }
-
-
-
-
 
 
 

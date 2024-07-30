@@ -1,3 +1,21 @@
+[includeIf "gitdir:C:/bitbucket/"]
+    path = ~/.gitconfig-bitbucket
+
+[includeIf "gitdir:C:/github/"]
+    path = ~/.gitconfig-github
+
+
+
+
+
+
+
+
+
+
+
+
+
 // src/test/java/com/schwab/cdt/spos/source/config/TestConfig.java
 
 package com.schwab.cdt.spos.source.config;

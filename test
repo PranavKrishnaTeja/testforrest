@@ -1,104 +1,17 @@
-package com.schwab.cdt.spos.source.test;
+// src/test/java/com/schwab/cdt/spos/source/config/TestConfig.java
 
-import com.schwab.cdt.spos.source.config.ApplicationConfig;
-import com.schwab.cdt.spos.source.config.LoggingConfig;
-import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
-import com.schwab.cdt.spos.source.job.DataIngestionJobBuilder;
-import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.generic.GenericRecord;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.core.launch.JobLauncherTestUtils;
-import org.springframework.batch.test.JobLauncherTestUtils;
-import org.springframework.batch.test.context.SpringBatchTest;
+package com.schwab.cdt.spos.source.config;
+
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.Resource;
-import org.springframework.test.context.ContextConfiguration;
-
-import static org.mockito.Mockito.mock;
-
-@SpringBatchTest
-@EnableBatchProcessing
-@Import({DataIngestionJobBuilder.class, DataIngestionStepBuilder.class, ApplicationConfig.class, LoggingConfig.class, CassandraConfig.class})
-public class BatchTestConfig {
-
-    @Bean
-    public JobLauncherTestUtils jobLauncherTestUtils() {
-        return new JobLauncherTestUtils();
-    }
-
-    @Bean
-    public SposStreamingClient sposStreamingClient() {
-        return mock(SposStreamingClient.class);
-    }
-
-    @Bean
-    public Resource testAvroFile() {
-        return new ClassPathResource("test-data.avro");
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.schwab.cdt.spos.source.test;
-
-import com.schwab.cdt.spos.source.job.DataIngestionJobBuilder;
-import org.apache.avro.generic.GenericRecord;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.context.annotation.Primary;
 import org.springframework.batch.test.context.SpringBatchTest;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.test.context.ContextConfiguration;
-
-import static org.mockito.Mockito.when;
+import org.springframework.context.annotation.Import;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 
 @SpringBatchTest
-@ContextConfiguration(classes = {BatchTestConfig.class})
-public class DataIngestionJobTest {
-
-    @Autowired
-    private JobLauncherTestUtils jobLauncherTestUtils;
-
-    @Autowired
-    private Job postgresDataIngestionJob;
-
-    @MockBean
-    private SposStreamingClient sposStreamingClient;
-
-    @BeforeEach
-    void setup() throws Exception {
-        when(sposStreamingClient.getObjectSize("test-documentId.avro")).thenReturn(1024L);
-        when(sposStreamingClient.getObjectWithByteRange("test-documentId.avro", 0, 1024))
-                .thenReturn(new byte[]{/* Mocked avro file bytes */});
-    }
-
-    @Test
-    void testPostgresDataIngestionJob() throws Exception {
-        JobParametersBuilder jobParametersBuilder = new JobParametersBuilder();
-        jobParametersBuilder.addString("documentId", "test-documentId");
-        jobParametersBuilder.addString("startTime", "2023-01-01T00:00:00");
-
-        JobExecution jobExecution = jobLauncherTestUtils.getJobLauncher().run(postgresDataIngestionJob, jobParametersBuilder.toJobParameters());
-
-        // Add assertions to verify job execution and processing results
-    }
+@TestConfiguration
+@Import(DataSourceAutoConfiguration.class)
+public class TestConfig {
+    // Include any specific test beans here, if necessary.
 }

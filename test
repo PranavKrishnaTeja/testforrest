@@ -2,58 +2,30 @@
 
 package com.schwab.cdt.spos.source.config;
 
-import com.schwab.cdt.spos.source.job.step.DataIngestionStepBuilder;
 import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
 import com.schwab.cdt.spos.source.job.step.processor.SposItemProcessor;
 import com.schwab.cdt.spos.source.job.step.writer.PostgresItemWriter;
 import com.schwab.cdt.spos.source.job.step.writer.CassandraItemWriter;
-import org.mockito.Mockito;
-import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.item.ItemWriter;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Profile;
 
 @TestConfiguration
-@EnableBatchProcessing
-@Import({MainConfig.class})  // Import the main configuration to reuse the beans
+@Import({ApplicationConfig.class, DataIngestionJobBuilder.class, DataIngestionStepBuilder.class}) // Ensure to import your main configurations here
 public class TestConfig {
 
-    @Bean
-    @Primary
-    @Profile("test")
-    public ItemWriter<AggregateFactory.Aggregate> postgresItemWriter() {
-        return Mockito.mock(PostgresItemWriter.class);
-    }
+    @MockBean
+    private SposItemReader sposItemReader;
 
-    @Bean
-    @Primary
-    @Profile("test")
-    public ItemWriter<AggregateFactory.Aggregate> cassandraItemWriter() {
-        return Mockito.mock(CassandraItemWriter.class);
-    }
+    @MockBean
+    private SposItemProcessor sposItemProcessor;
 
-    @Bean
-    @Primary
-    @Profile("test")
-    public SposItemReader sposItemReader() {
-        return Mockito.mock(SposItemReader.class);
-    }
+    @MockBean
+    private PostgresItemWriter postgresItemWriter;
 
-    @Bean
-    @Primary
-    @Profile("test")
-    public SposItemProcessor sposItemProcessor() {
-        return Mockito.mock(SposItemProcessor.class);
-    }
+    @MockBean
+    private CassandraItemWriter cassandraItemWriter;
 }
-
-
-
-
-
 
 
 
@@ -109,6 +81,10 @@ public class DataIngestionJobTest {
         assertEquals("COMPLETED", jobExecution.getExitStatus().getExitCode());
     }
 }
+
+
+
+
 
 
 

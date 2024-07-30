@@ -70,3 +70,74 @@ public class DataIngestionJobTest {
         assertEquals("COMPLETED", jobExecution.getExitStatus().getExitCode());
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// src/test/java/com/schwab/cdt/spos/source/job/step/DataIngestionStepTest.java
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.config.TestConfig;
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.StepSynchronizationManager;
+import org.springframework.batch.test.MetaDataInstanceFactory;
+import org.springframework.batch.test.context.SpringBatchTest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+
+import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@ExtendWith(MockitoExtension.class)
+@SpringBatchTest
+@SpringBootTest(classes = {TestConfig.class})
+@ActiveProfiles("test")
+public class DataIngestionStepTest {
+
+    @Autowired
+    private DataIngestionStepBuilder dataIngestionStepBuilder;
+
+    @Mock
+    private AggregateFactory.Aggregate aggregate;
+
+    @Test
+    public void testPostgresDataIngestionStep() throws Exception {
+        Step postgresDataIngestionStep = dataIngestionStepBuilder.postgresDataIngestionStep();
+        StepExecution stepExecution = MetaDataInstanceFactory.createStepExecution();
+
+        StepContext stepContext = StepSynchronizationManager.register(stepExecution);
+        stepContext.getStepExecution().getExecutionContext().put("aggregate", aggregate);
+
+        when(aggregate.name()).thenReturn("test");
+
+        postgresDataIngestionStep.execute(stepExecution);
+
+        assertEquals("COMPLETED", stepExecution.getExitStatus().getExitCode());
+    }
+}

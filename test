@@ -1,25 +1,23 @@
-{
-  "type": "record",
-  "name": "AffiliateAccountBalances",
-  "fields": [
-    {"name": "afltAcctId", "type": "string"},
-    {"name": "afltAcctCmpyCd", "type": "string"},
-    {"name": "acctStatusCd", "type": "string"},
-    {"name": "acctSvcOnlyInd", "type": "string"},
-    {"name": "acctTypeCd", "type": "string"},
-    {"name": "acctName", "type": "string"},
-    {"name": "sponsorNm", "type": "string"},
-    {"name": "unavailAssetAmt", "type": "bytes", "logicalType": "decimal", "precision": 8, "scale": 2},
-    {"name": "availAssetAmt", "type": "bytes", "logicalType": "decimal", "precision": 8, "scale": 2},
-    {"name": "acctOblgAmt", "type": "bytes", "logicalType": "decimal", "precision": 8, "scale": 2},
-    {"name": "maxOblgAmt", "type": "bytes", "logicalType": "decimal", "precision": 8, "scale": 2},
-    {"name": "acctOpenDt", "type": "string"},
-    {"name": "reltAcctId", "type": "string"},
-    {"name": "reltAcctCmpyCd", "type": "string"},
-    {"name": "dataOriginTs", "type": "string"},
-    {"name": "internalOwnerId", "type": "string"},
-    {"name": "acctNoteDescTx", "type": "string"}
-  ]
+plugins {
+    id 'java'
+}
+
+group = 'com.example'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.apache.avro:avro:1.11.0'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.4'
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
 }
 
 
@@ -38,46 +36,63 @@
 
 
 
-package com.schwab.cdt.spos.source.job.step.reader;
 
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+
+
+
+
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.avro.Schema;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.ActiveProfiles;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.Iterator;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.mock;
+public class ConvertJsonToAvro {
 
-@SpringBootTest
-@ActiveProfiles("test")
-@Import({SposItemReader.class})
-public class SposItemReaderTest {
+    public static void main(String[] args) {
+        File schemaFile = new File("schema.avsc");
+        File jsonFile = new File("data.json");
+        File avroFile = new File("data.avro");
 
-    @Autowired
-    private SposItemReader sposItemReader;
+        try {
+            // Parse the schema
+            Schema schema = new Schema.Parser().parse(schemaFile);
 
-    private SposStreamingClient sposStreamingClient;
-    private ExecutionContext executionContext;
+            // Read JSON data
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode jsonData = mapper.readTree(jsonFile);
 
-    @BeforeEach
-    public void setUp() throws IOException {
-        this.sposStreamingClient = mock(SposStreamingClient.class);
-        this.executionContext = new ExecutionContext();
-        this.sposItemReader = new SposItemReader(sposStreamingClient, "sample-affiliate-account-balances.avro");
-        sposItemReader.open(executionContext);
-    }
+            // Prepare Avro writer
+            GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
+            dataFileWriter.create(schema, avroFile);
 
-    @Test
-    public void testSposItemReader() throws Exception {
-        GenericRecord record = sposItemReader.read();
-        assertNotNull(record);
-        // Add more assertions based on the expected fields and values in the record
+            // Convert JSON to Avro
+            Iterator<JsonNode> iterator = jsonData.elements();
+            while (iterator.hasNext()) {
+                JsonNode node = iterator.next();
+                GenericRecord record = new GenericData.Record(schema);
+
+                schema.getFields().forEach(field -> {
+                    String fieldName = field.name();
+                    record.put(fieldName, node.get(fieldName).asText()); // Handle different data types accordingly
+                });
+
+                dataFileWriter.append(record);
+            }
+
+            dataFileWriter.close();
+            System.out.println("Conversion to Avro completed successfully.");
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 }

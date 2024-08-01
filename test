@@ -21,3 +21,63 @@
     {"name": "acctNoteDescTx", "type": "string"}
   ]
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.cdt.spos.source.job.step.reader;
+
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import org.apache.avro.generic.GenericRecord;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.io.IOException;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.mock;
+
+@SpringBootTest
+@ActiveProfiles("test")
+@Import({SposItemReader.class})
+public class SposItemReaderTest {
+
+    @Autowired
+    private SposItemReader sposItemReader;
+
+    private SposStreamingClient sposStreamingClient;
+    private ExecutionContext executionContext;
+
+    @BeforeEach
+    public void setUp() throws IOException {
+        this.sposStreamingClient = mock(SposStreamingClient.class);
+        this.executionContext = new ExecutionContext();
+        this.sposItemReader = new SposItemReader(sposStreamingClient, "sample-affiliate-account-balances.avro");
+        sposItemReader.open(executionContext);
+    }
+
+    @Test
+    public void testSposItemReader() throws Exception {
+        GenericRecord record = sposItemReader.read();
+        assertNotNull(record);
+        // Add more assertions based on the expected fields and values in the record
+    }
+}

@@ -1,98 +1,53 @@
-plugins {
-    id 'java'
-}
+package com.schwab.cdt.spos.source.job.step.reader;
 
-group = 'com.example'
-version = '1.0-SNAPSHOT'
-
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    implementation 'org.apache.avro:avro:1.11.0'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.4'
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericDatumWriter;
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
 import org.apache.avro.generic.GenericRecord;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Iterator;
+import static org.assertj.core.api.Assertions.assertThat;
 
-public class ConvertJsonToAvro {
+@SpringBootTest
+@ActiveProfiles("test")
+@Import({SposStreamingClient.class, SposItemReader.class})
+public class SposItemReaderTest {
 
-    public static void main(String[] args) {
-        File schemaFile = new File("schema.avsc");
-        File jsonFile = new File("data.json");
-        File avroFile = new File("data.avro");
+    @Autowired
+    private SposStreamingClient sposStreamingClient;
 
-        try {
-            // Parse the schema
-            Schema schema = new Schema.Parser().parse(schemaFile);
+    private ItemReader<GenericRecord> sposItemReader;
 
-            // Read JSON data
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode jsonData = mapper.readTree(jsonFile);
+    @BeforeEach
+    void setUp() throws Exception {
+        String documentId = "affiliateaccount_2023-07-27.avro";
+        sposItemReader = new SposItemReader(sposStreamingClient, documentId);
+        ((SposItemReader) sposItemReader).open(new ExecutionContext());
+    }
 
-            // Prepare Avro writer
-            GenericDatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
-            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriter.create(schema, avroFile);
+    @Test
+    void testRead() throws Exception {
+        GenericRecord record = sposItemReader.read();
+        assertThat(record).isNotNull();
+        // Further assertions can be added based on expected record values
+    }
 
-            // Convert JSON to Avro
-            Iterator<JsonNode> iterator = jsonData.elements();
-            while (iterator.hasNext()) {
-                JsonNode node = iterator.next();
-                GenericRecord record = new GenericData.Record(schema);
+    @Test
+    void testOpen() throws Exception {
+        ((SposItemReader) sposItemReader).open(new ExecutionContext());
+        // Verify if the stream was successfully opened
+        assertThat(sposItemReader.read()).isNotNull();
+    }
 
-                schema.getFields().forEach(field -> {
-                    String fieldName = field.name();
-                    record.put(fieldName, node.get(fieldName).asText()); // Handle different data types accordingly
-                });
-
-                dataFileWriter.append(record);
-            }
-
-            dataFileWriter.close();
-            System.out.println("Conversion to Avro completed successfully.");
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    @Test
+    void testClose() throws Exception {
+        ((SposItemReader) sposItemReader).close();
+        // Verify if the stream was successfully closed
+        assertThat(((SposItemReader) sposItemReader).doRead()).isNull();
     }
 }

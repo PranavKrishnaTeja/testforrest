@@ -1,138 +1,64 @@
-package com.schwab.cdt.spos.source.job.step;
-
-import com.schwab.cdt.spos.source.config.LoggingConfig;
-import com.schwab.pce.slf4j.logging.EliLogger;
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.StepExecution;
+import schwab.discovery.client.EndpointNotFoundException;
+import schwab.discovery.client.ServiceRegistryException;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.io.IOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
+
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class DataIngestionStepExecutionListenerTest {
+class StreamServiceTest {
 
     @Mock
-    private EliLogger eliLogger;
+    private SposStreamingClient sposStreamingClient;
 
-    @Mock
-    private LoggingConfig loggingConfig;
-
-    private DataIngestionStepExecutionListener listener;
+    private StreamService streamService;
+    private PipedInputStream pipedInputStream;
+    private PipedOutputStream pipedOutputStream;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws EndpointNotFoundException, IOException, ServiceRegistryException {
         MockitoAnnotations.openMocks(this);
-        listener = new DataIngestionStepExecutionListener(eliLogger, loggingConfig);
+        pipedInputStream = new PipedInputStream();
+        pipedOutputStream = new PipedOutputStream(pipedInputStream);
+        String documentId = "test_documentId.avro";
+        when(sposStreamingClient.getObjectSize(documentId)).thenReturn(1024L);
+        streamService = new StreamService(sposStreamingClient, pipedInputStream, documentId);
     }
 
     @Test
-    void beforeStep_shouldLogStepNameAndFailureExceptions() {
-        StepExecution stepExecution = mock(StepExecution.class);
-        when(stepExecution.getStepName()).thenReturn("testStep");
-        when(stepExecution.getFailureExceptions()).thenReturn(null);
+    void testRun() throws Exception {
+        String documentId = "test_documentId.avro";
+        byte[] testData = new byte[1024];
+        when(sposStreamingClient.getObjectWithByteRange(documentId, 0, 1024)).thenReturn(testData);
 
-        listener.beforeStep(stepExecution);
+        Thread thread = new Thread(streamService);
+        thread.start();
+        thread.join();
 
-        verify(eliLogger, times(1)).log(any());
+        byte[] buffer = new byte[1024];
+        int bytesRead = pipedInputStream.read(buffer);
+
+        assertEquals(1024, bytesRead);
+        assertArrayEquals(testData, buffer);
     }
 
     @Test
-    void afterStep_shouldReturnExitStatus() {
-        StepExecution stepExecution = mock(StepExecution.class);
-        ExitStatus exitStatus = ExitStatus.COMPLETED;
-        when(stepExecution.getExitStatus()).thenReturn(exitStatus);
+    void testRunWithException() throws Exception {
+        String documentId = "test_documentId.avro";
+        when(sposStreamingClient.getObjectWithByteRange(documentId, 0, 1024)).thenThrow(new IOException("Test Exception"));
 
-        ExitStatus result = listener.afterStep(stepExecution);
+        Thread thread = new Thread(streamService);
+        thread.start();
+        thread.join();
 
-        assertEquals(exitStatus, result);
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.schwab.cdt.spos.source.job.step;
-
-import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
-import org.apache.avro.generic.GenericRecord;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.batch.item.ItemReader;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.transaction.PlatformTransactionManager;
-
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.*;
-
-class DataIngestionStepBuilderTest {
-
-    @Mock
-    private JobRepository jobRepository;
-
-    @Mock
-    private ItemReader<GenericRecord> sposItemReader;
-
-    @Mock
-    private ItemProcessor<GenericRecord, AggregateFactory.Aggregate> sposItemProcessor;
-
-    @Mock
-    private ItemWriter<AggregateFactory.Aggregate> postgresItemWriter;
-
-    @Mock
-    private ItemWriter<AggregateFactory.Aggregate> cassandraItemWriter;
-
-    @Mock
-    private PlatformTransactionManager transactionManager;
-
-    @Mock
-    private StepExecutionListener stepExecutionListener;
-
-    private DataIngestionStepBuilder stepBuilder;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-        stepBuilder = new DataIngestionStepBuilder(jobRepository, transactionManager, postgresItemWriter, cassandraItemWriter, sposItemReader, sposItemProcessor, stepExecutionListener);
-    }
-
-    @Test
-    void postgresDataIngestionStep_shouldBuildStep() {
-        Step step = stepBuilder.postgresDataIngestionStep();
-
-        assertNotNull(step);
-        verify(jobRepository, times(1)).getJobInstance(anyLong());
-    }
-
-    @Test
-    void cassandraDataIngestionStep_shouldBuildStep() {
-        Step step = stepBuilder.cassandraDataIngestionStep();
-
-        assertNotNull(step);
-        verify(jobRepository, times(1)).getJobInstance(anyLong());
+        // Check if exception is handled and appropriate logging is done (if implemented)
+        // Since the code has a TODO for logging, you can verify using System.out.println if required
     }
 }

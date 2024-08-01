@@ -1,53 +1,138 @@
-package com.schwab.cdt.spos.source.job.step.reader;
+package com.schwab.cdt.spos.source.job.step;
 
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import com.schwab.cdt.spos.source.config.LoggingConfig;
+import com.schwab.pce.slf4j.logging.EliLogger;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepExecution;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.*;
+
+class DataIngestionStepExecutionListenerTest {
+
+    @Mock
+    private EliLogger eliLogger;
+
+    @Mock
+    private LoggingConfig loggingConfig;
+
+    private DataIngestionStepExecutionListener listener;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        listener = new DataIngestionStepExecutionListener(eliLogger, loggingConfig);
+    }
+
+    @Test
+    void beforeStep_shouldLogStepNameAndFailureExceptions() {
+        StepExecution stepExecution = mock(StepExecution.class);
+        when(stepExecution.getStepName()).thenReturn("testStep");
+        when(stepExecution.getFailureExceptions()).thenReturn(null);
+
+        listener.beforeStep(stepExecution);
+
+        verify(eliLogger, times(1)).log(any());
+    }
+
+    @Test
+    void afterStep_shouldReturnExitStatus() {
+        StepExecution stepExecution = mock(StepExecution.class);
+        ExitStatus exitStatus = ExitStatus.COMPLETED;
+        when(stepExecution.getExitStatus()).thenReturn(exitStatus);
+
+        ExitStatus result = listener.afterStep(stepExecution);
+
+        assertEquals(exitStatus, result);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.apache.avro.generic.GenericRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.batch.item.ExecutionContext;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.*;
 
-@SpringBootTest
-@ActiveProfiles("test")
-@Import({SposStreamingClient.class, SposItemReader.class})
-public class SposItemReaderTest {
+class DataIngestionStepBuilderTest {
 
-    @Autowired
-    private SposStreamingClient sposStreamingClient;
+    @Mock
+    private JobRepository jobRepository;
 
+    @Mock
     private ItemReader<GenericRecord> sposItemReader;
 
+    @Mock
+    private ItemProcessor<GenericRecord, AggregateFactory.Aggregate> sposItemProcessor;
+
+    @Mock
+    private ItemWriter<AggregateFactory.Aggregate> postgresItemWriter;
+
+    @Mock
+    private ItemWriter<AggregateFactory.Aggregate> cassandraItemWriter;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
+    @Mock
+    private StepExecutionListener stepExecutionListener;
+
+    private DataIngestionStepBuilder stepBuilder;
+
     @BeforeEach
-    void setUp() throws Exception {
-        String documentId = "affiliateaccount_2023-07-27.avro";
-        sposItemReader = new SposItemReader(sposStreamingClient, documentId);
-        ((SposItemReader) sposItemReader).open(new ExecutionContext());
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        stepBuilder = new DataIngestionStepBuilder(jobRepository, transactionManager, postgresItemWriter, cassandraItemWriter, sposItemReader, sposItemProcessor, stepExecutionListener);
     }
 
     @Test
-    void testRead() throws Exception {
-        GenericRecord record = sposItemReader.read();
-        assertThat(record).isNotNull();
-        // Further assertions can be added based on expected record values
+    void postgresDataIngestionStep_shouldBuildStep() {
+        Step step = stepBuilder.postgresDataIngestionStep();
+
+        assertNotNull(step);
+        verify(jobRepository, times(1)).getJobInstance(anyLong());
     }
 
     @Test
-    void testOpen() throws Exception {
-        ((SposItemReader) sposItemReader).open(new ExecutionContext());
-        // Verify if the stream was successfully opened
-        assertThat(sposItemReader.read()).isNotNull();
-    }
+    void cassandraDataIngestionStep_shouldBuildStep() {
+        Step step = stepBuilder.cassandraDataIngestionStep();
 
-    @Test
-    void testClose() throws Exception {
-        ((SposItemReader) sposItemReader).close();
-        // Verify if the stream was successfully closed
-        assertThat(((SposItemReader) sposItemReader).doRead()).isNull();
+        assertNotNull(step);
+        verify(jobRepository, times(1)).getJobInstance(anyLong());
     }
 }

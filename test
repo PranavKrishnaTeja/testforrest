@@ -1,61 +1,60 @@
-import com.schwab.cdt.spos.source.service.StreamService;
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import schwab.discovery.client.EndpointNotFoundException;
-import schwab.discovery.client.ServiceRegistryException;
+Sub CreateEnhancedFinanceTrackerSlide()
+    Dim ppt As Object
+    Dim pres As Object
+    Dim slide As Object
+    Dim shape As Object
+    Dim top As Single
+    Dim left As Single
+    Dim width As Single
+    Dim height As Single
 
-import java.io.IOException;
+    ' Create a new PowerPoint application
+    Set ppt = CreateObject("PowerPoint.Application")
+    ppt.Visible = True
+    
+    ' Create a new presentation
+    Set pres = ppt.Presentations.Add
+    
+    ' Add a new slide
+    Set slide = pres.Slides.Add(1, 1) ' 1 = ppLayoutTitle
+    
+    ' Set slide title
+    slide.Shapes.Title.TextFrame.TextRange.Text = "Personal Finance Tracker Overview"
+    slide.Shapes.Placeholders(2).TextFrame.TextRange.Text = "Data, Case Studies, Research, Implementation Strategy, Marketing & User Engagement"
 
-import static org.mockito.Mockito.*;
+    ' Set the top, left, width, and height for the shapes
+    top = 150
+    left = 50
+    width = 600
+    height = 100
+    
+    ' Add Data example section
+    Set shape = slide.Shapes.AddTextbox(1, left, top, width, height)
+    shape.TextFrame.TextRange.Text = "Example Case Studies and Research:" & vbCrLf & _
+                                     "1. Research by Business Insider: Gen Z values convenience and digital solutions for financial management but still appreciates human advice for more complex decisions." & vbCrLf & _
+                                     "2. CivicScience Study: Gen Z has the highest favorability towards finance apps, indicating a strong market potential." & vbCrLf & _
+                                     "3. U.S. Bank Insights: Integrating simple, practical financial education in apps can significantly enhance engagement and financial confidence among young users." & vbCrLf & _
+                                     "4. Mobile Applications for Personal Finance Management: Users are likely to adopt finance apps if they perceive them to be useful and capable of improving their financial outcomes." & vbCrLf & _
+                                     "5. AI-driven Personal Finance Apps: AI can significantly improve financial decision-making by analyzing data and providing personalized insights." & vbCrLf & _
+                                     "6. Gamification in Finance Apps: Gamified elements can enhance user engagement and make financial management more appealing." & vbCrLf & _
+                                     "7. Smartphone Apps and Financial Capability: Users of financial apps demonstrated improved budgeting skills, reduced unnecessary spending, and increased savings."
 
-class StreamServiceTest {
+    ' Add Implementation Strategy section
+    top = top + height + 20
+    Set shape = slide.Shapes.AddTextbox(1, left, top, width, height)
+    shape.TextFrame.TextRange.Text = "Implementation Strategy:" & vbCrLf & _
+                                     "1. Market Research: Conduct surveys and focus groups with Gen Z and new investors to identify their pain points and preferences." & vbCrLf & _
+                                     "2. Design and Development: Create a prototype with a user-friendly interface and essential features based on research findings." & vbCrLf & _
+                                     "3. Beta Testing: Launch a beta version to gather user feedback. Use this feedback to refine features, improve usability, and ensure the app meets user needs." & vbCrLf & _
+                                     "4. Full Launch and Continuous Improvement: Roll out the app with a strong marketing campaign. Continuously monitor user feedback and market trends to update features and maintain relevance."
 
-    @Mock
-    private SposStreamingClient sposStreamingClient;
+    ' Add Marketing and User Engagement section
+    top = top + height + 20
+    Set shape = slide.Shapes.AddTextbox(1, left, top, width, height)
+    shape.TextFrame.TextRange.Text = "Marketing and User Engagement:" & vbCrLf & _
+                                     "1. Targeted Social Media Campaigns: Use platforms like Instagram, TikTok, and Twitter to showcase how the app works, user testimonials, and success stories." & vbCrLf & _
+                                     "2. Influencer Collaborations: Partner with influencers who focus on finance, lifestyle, and self-improvement. They can create content demonstrating the app's features and their personal experiences using it." & vbCrLf & _
+                                     "3. Referral Programs: Encourage current users to refer friends by offering incentives such as cash bonuses or increased interest rates on savings for each successful referral." & vbCrLf & _
+                                     "4. Webinars and Workshops: Host regular online events to educate potential users about personal finance and how your app can help them achieve their financial goals."
 
-    private StreamService streamService;
-
-    @BeforeEach
-    void setUp() throws EndpointNotFoundException, IOException, ServiceRegistryException {
-        MockitoAnnotations.openMocks(this);
-        String documentId = "test_documentId.avro";
-        when(sposStreamingClient.getObjectSize(documentId)).thenReturn(1024L);
-        streamService = new StreamService(sposStreamingClient, new MockPipedInputStream(), documentId);
-    }
-
-    @Test
-    void testRun() throws Exception {
-        String documentId = "test_documentId.avro";
-        byte[] testData = new byte[1024];
-        when(sposStreamingClient.getObjectWithByteRange(documentId, 0, 1024)).thenReturn(testData);
-
-        // Run StreamService logic
-        streamService.run();
-
-        // Validate interactions and logic here, since no actual stream to verify
-        verify(sposStreamingClient).getObjectWithByteRange(documentId, 0, 1024);
-    }
-
-    @Test
-    void testRunWithException() throws Exception {
-        String documentId = "test_documentId.avro";
-        when(sposStreamingClient.getObjectWithByteRange(documentId, 0, 1024)).thenThrow(new IOException("Test Exception"));
-
-        // Run StreamService logic
-        streamService.run();
-
-        // Validate interactions and ensure exceptions are handled properly
-        verify(sposStreamingClient).getObjectWithByteRange(documentId, 0, 1024);
-    }
-
-    // Mocked PipedInputStream to avoid actual I/O operations
-    class MockPipedInputStream extends java.io.InputStream {
-        @Override
-        public int read() {
-            return -1; // End of stream
-        }
-    }
-}
+End Sub

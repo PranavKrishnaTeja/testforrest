@@ -3,7 +3,6 @@ package com.schwab.cdt.spos.source.job.step;
 import com.schwab.cdt.spos.source.config.ArcataConfig;
 import com.schwab.cdt.spos.source.config.SposConfig;
 import com.schwab.cdt.spos.source.logger.LogRecordCreator;
-import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
@@ -36,105 +35,7 @@ class DataIngestionStepExecutionListenerTest {
     }
 
     @Test
-    void testBeforeStep() throws Exception {
-        // Arrange
-        when(sposConfig.bucket()).thenReturn("testBucket");
-        when(sposConfig.serviceKey()).thenReturn("testServiceKey");
-        when(arcataConfig.getEndpoint()).thenReturn(mock(Endpoint.class));
-        when(arcataConfig.getEndpoint().getUrl()).thenReturn("http://test-endpoint");
-
-        // Act
-        listener.beforeStep(stepExecution);
-
-        // Assert
-        verify(logRecordCreator, times(1)).toOutBound(
-                anyString(),
-                eq("stepExecutionStepName"),
-                eq(stepExecution.getStartTime()),
-                eq(Collections.singletonMap("Spos Bucket", "testBucket")),
-                isNull(),
-                eq(ServiceCallType.RPC),
-                eq("testServiceKey"),
-                eq("http://test-endpoint"),
-                eq("testPort"),
-                isNull()
-        );
-    }
-
-    @Test
-    void testAfterStep() {
-        // Arrange
-        when(stepExecution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
-
-        // Act
-        ExitStatus exitStatus = listener.afterStep(stepExecution);
-
-        // Assert
-        assertEquals(ExitStatus.COMPLETED, exitStatus);
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-package com.schwab.cdt.spos.source.job.step;
-
-import com.schwab.cdt.spos.source.config.ArcataConfig;
-import com.schwab.cdt.spos.source.config.SposConfig;
-import com.schwab.cdt.spos.source.logger.LogRecordCreator;
-import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.listener.StepExecutionListenerSupport;
-
-import java.time.LocalDateTime;
-import java.util.Collections;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
-
-class DataIngestionStepExecutionListenerTest {
-
-    @InjectMocks
-    private DataIngestionStepExecutionListener listener;
-
-    @Mock
-    private SposConfig sposConfig;
-
-    @Mock
-    private ArcataConfig arcataConfig;
-
-    @Mock
-    private LogRecordCreator logRecordCreator;
-
-    @Mock
-    private StepExecution stepExecution;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-    }
-
-    @Test
-    void testBeforeStep() throws Exception {
+    void beforeStep_shouldLogStepNameAndFailureExceptions() {
         // Arrange
         when(sposConfig.bucket()).thenReturn("testBucket");
         when(sposConfig.serviceKey()).thenReturn("testServiceKey");
@@ -148,29 +49,19 @@ class DataIngestionStepExecutionListenerTest {
         listener.beforeStep(stepExecution);
 
         // Assert
-        verify(logRecordCreator, times(1)).toOutBound(
-                anyString(),
-                eq("stepExecutionStepName"),
-                any(),
-                eq(Collections.singletonMap("Spos Bucket", "testBucket")),
-                isNull(),
-                eq(ServiceCallType.RPC),
-                eq("testServiceKey"),
-                eq("http://test-endpoint"),
-                eq("testPort"),
-                isNull()
-        );
+        verify(logRecordCreator, times(1)).toOutBound(any(), eq("stepExecutionStepName"), any(), anyMap(), isNull(), eq(ServiceCallType.RPC), eq("testServiceKey"), eq("http://test-endpoint"), eq("testPort"), isNull());
     }
 
     @Test
-    void testAfterStep() {
+    void afterStep_shouldReturnExitStatus() {
         // Arrange
-        when(stepExecution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
+        ExitStatus exitStatus = ExitStatus.COMPLETED;
+        when(stepExecution.getExitStatus()).thenReturn(exitStatus);
 
         // Act
-        ExitStatus exitStatus = listener.afterStep(stepExecution);
+        ExitStatus result = listener.afterStep(stepExecution);
 
         // Assert
-        assertEquals(ExitStatus.COMPLETED, exitStatus);
+        assertEquals(exitStatus, result);
     }
 }

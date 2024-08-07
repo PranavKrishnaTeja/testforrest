@@ -1,33 +1,112 @@
-### Expanded Points and Significance
+package com.schwab.cdt.spos.source.service;
 
-1. **Research by Business Insider: Gen Z values convenience and digital solutions for financial management but still appreciates human advice for more complex decisions.**
-   - **Summary:** This research highlights that Gen Z prefers the efficiency and accessibility of digital tools for their everyday financial management needs. However, for more intricate and significant financial decisions, they still value the input and reassurance provided by human advisors.
-   - **Significance to Personal Finance Tracker App:** This insight is crucial as it suggests that our app should offer a seamless and intuitive user interface for routine financial tasks, coupled with access to human financial advisors for more complex queries. By integrating both digital convenience and human expertise, we can attract more Gen Z users who are looking for comprehensive support in managing their finances.
+import com.schwab.cdt.spos.source.config.IngestionJobConfig;
+import com.schwab.cdt.spos.source.job.DataIngestionJobBuilder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.core.repository.JobParametersInvalidException;
+import org.springframework.batch.core.repository.JobRestartException;
 
-2. **CivicScience Study: Gen Z has the highest favorability towards finance apps, indicating a strong market potential.**
-   - **Summary:** The CivicScience study reveals that Gen Z shows a higher preference and positive attitude towards using finance apps compared to other generations. This indicates a substantial opportunity to cater to this tech-savvy demographic.
-   - **Significance to Personal Finance Tracker App:** This data suggests that there is a significant market potential for finance apps among Gen Z. Our app can capitalize on this trend by focusing on features that resonate with their needs, such as ease of use, quick access to financial information, and innovative tools for managing their investments.
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
-3. **U.S. Bank Insights: Integrating simple, practical financial education in apps can significantly enhance engagement and financial confidence among young users.**
-   - **Summary:** U.S. Bank Insights indicate that when financial apps incorporate educational content that is straightforward and practical, it greatly boosts user engagement and builds financial confidence, especially among younger users.
-   - **Significance to Personal Finance Tracker App:** Incorporating educational modules that teach fundamental financial concepts, investment strategies, and money management tips can make our app more appealing. By empowering Gen Z with knowledge, we can increase their confidence in making financial decisions, thereby fostering loyalty and long-term use of our app.
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
 
-4. **Mobile Applications for Personal Finance Management: Users are likely to adopt finance apps if they perceive them to be useful and capable of improving their financial outcomes.**
-   - **Summary:** The effectiveness of mobile finance apps in improving financial outcomes is a key factor influencing user adoption. If users find the app beneficial in managing their finances and see positive results, they are more likely to continue using it.
-   - **Significance to Personal Finance Tracker App:** To attract and retain users, our app should demonstrate tangible benefits such as improved budgeting, savings, and investment returns. Features that offer real-time tracking, personalized financial advice, and performance analytics can help users see the value and effectiveness of the app in enhancing their financial well-being.
+@ExtendWith(MockitoExtension.class)
+class BatchServiceTest {
 
-5. **AI-driven Personal Finance Apps: AI can significantly improve financial decision-making by analyzing data and providing personalized insights.**
-   - **Summary:** AI technology in personal finance apps can analyze vast amounts of data to deliver customized insights and recommendations, thereby aiding users in making better financial decisions.
-   - **Significance to Personal Finance Tracker App:** Integrating AI capabilities can set our app apart by offering personalized financial advice based on user behavior and financial patterns. This can help users optimize their investment strategies, manage expenses more effectively, and achieve their financial goals with greater precision and confidence.
+    @Mock
+    private JobLauncher jobLauncher;
 
-6. **Gamification in Finance Apps: Gamified elements can enhance user engagement and make financial management more appealing.**
-   - **Summary:** Gamification involves incorporating game-like features such as challenges, rewards, and progress tracking into apps to make financial management more engaging and enjoyable.
-   - **Significance to Personal Finance Tracker App:** Adding gamified elements such as achievement badges, rewards for reaching financial milestones, and interactive learning modules can increase user engagement. By making financial management fun and interactive, we can attract a larger Gen Z audience and encourage regular use of our app.
+    @Mock
+    private IngestionJobConfig ingestionJobConfig;
 
-7. **Smartphone Apps and Financial Capability: Users of financial apps demonstrated improved budgeting skills, reduced unnecessary spending, and increased savings.**
-   - **Summary:** Studies have shown that users who regularly use financial apps tend to improve their budgeting skills, cut down on unnecessary expenses, and save more money.
-   - **Significance to Personal Finance Tracker App:** Highlighting these benefits can be a powerful marketing strategy. By showcasing how our app can help users improve their financial habits and outcomes, we can appeal to Gen Z’s desire for financial independence and stability. Testimonials, case studies, and data-driven results can reinforce the app’s effectiveness in enhancing financial capability.
+    @Mock
+    private DataIngestionJobBuilder dataIngestionJobBuilder;
 
-### Conclusion
+    @InjectMocks
+    private BatchService batchService;
 
-By addressing the preferences and needs of Gen Z, our Personal Finance Tracker App can attract and retain young investors. Emphasizing convenience, integrating educational content, utilizing AI for personalized insights, incorporating gamification, and demonstrating tangible financial benefits are key strategies that will help us gain more customers and enhance their overall financial experience. This approach not only aligns with Gen Z’s expectations but also positions our stock broker company as a forward-thinking and customer-centric provider in the financial services industry.
+    private IngestionJobConfig.Job mockJob;
+
+    @BeforeEach
+    void setUp() {
+        mockJob = new IngestionJobConfig.Job(
+                "testJob",
+                "source",
+                "target",
+                "sourceDocumentId",
+                "targetId"
+        );
+
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(mockJob));
+    }
+
+    @Test
+    void start_shouldRunCassandraJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
+        when(dataIngestionJobBuilder.cassandraDataIngestionJob()).thenReturn(mock(Job.class));
+        mockJob = new IngestionJobConfig.Job(
+                "testJob",
+                "source",
+                "cassandra",
+                "sourceDocumentId",
+                "targetId"
+        );
+
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(mockJob));
+
+        batchService.start("testJob");
+
+        verify(jobLauncher).run(any(Job.class), any(JobParameters.class));
+    }
+
+    @Test
+    void start_shouldRunPostgresJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
+        when(dataIngestionJobBuilder.postgresDataIngestionJob()).thenReturn(mock(Job.class));
+
+        batchService.start("testJob");
+
+        verify(jobLauncher).run(any(Job.class), any(JobParameters.class));
+    }
+
+    @Test
+    void start_shouldThrowUnsupportedOperationExceptionIfJobNotFound() {
+        when(ingestionJobConfig.jobs()).thenReturn(List.of());
+
+        assertThrows(UnsupportedOperationException.class, () -> batchService.start("nonExistentJob"));
+    }
+
+    @Test
+    void jobLookUpWithMetadata_shouldReturnJobMetadata() {
+        Map<String, String> metadata = batchService.jobLookUpWithMetadata("testJob");
+
+        assert metadata.equals(Map.of(
+            "jobName", "testJob",
+            "source", "source",
+            "target", "target",
+            "documentId", mockJob.sourceDocumentId(),
+            "targetId", "targetId"
+        ));
+    }
+
+    @Test
+    void jobLookUpWithMetadata_shouldThrowUnsupportedOperationExceptionIfJobNotFound() {
+        when(ingestionJobConfig.jobs()).thenReturn(List.of());
+
+        assertThrows(UnsupportedOperationException.class, () -> batchService.jobLookUpWithMetadata("nonExistentJob"));
+    }
+}

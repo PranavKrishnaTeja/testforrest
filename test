@@ -1,63 +1,176 @@
-import com.schwab.cdt.spos.source.constant.Transformation;
-import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
-import org.apache.avro.generic.GenericRecord;
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.config.ArcataConfig;
+import com.schwab.cdt.spos.source.config.SposConfig;
+import com.schwab.cdt.spos.source.logger.LogRecordCreator;
+import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.beans.factory.annotation.Value;
-
-import java.math.BigDecimal;
-import java.nio.ByteBuffer;
-import java.util.Collections;
-import java.util.List;
+import org.mockito.*;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepExecution;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
-public class SposItemProcessorTest {
+class DataIngestionStepExecutionListenerTest {
+
+    @InjectMocks
+    private DataIngestionStepExecutionListener listener;
 
     @Mock
-    private AggregateFactory aggregateFactory;
-    
-    @Mock
-    private GenericRecord genericRecord;
+    private SposConfig sposConfig;
 
-    private SposItemProcessor sposItemProcessor;
+    @Mock
+    private ArcataConfig arcataConfig;
+
+    @Mock
+    private LogRecordCreator logRecordCreator;
+
+    @Mock
+    private StepExecution stepExecution;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         MockitoAnnotations.openMocks(this);
-        when(aggregateFactory.aggregates()).thenReturn(Collections.singletonList(
-                new AggregateFactory.Aggregate("householdingbalances", 
-                        new AggregateFactory.SourceSchema("sourceSchema"),
-                        new AggregateFactory.Table("targetId", List.of(
-                                new AggregateFactory.Columns("affiliateAccountId", 
-                                        new AggregateFactory.Metadata(null, "string", "afltAcctId", Transformation.NONE, null)),
-                                new AggregateFactory.Columns("unavailableAsset", 
-                                        new AggregateFactory.Metadata(null, "decimal", "unavailAssetAmt", Transformation.AVRO_DECIMAL_TO_BIG_DECIMAL, 2))
-                        )),
-                        "sql")
-        ));
-        
-        this.sposItemProcessor = new SposItemProcessor(aggregateFactory, "targetId", "householdingbalances_documentId");
     }
 
     @Test
-    public void testProcess() throws Exception {
-        when(genericRecord.get("afltAcctId")).thenReturn("12345");
-        when(genericRecord.get("unavailAssetAmt")).thenReturn(ByteBuffer.wrap(BigDecimal.valueOf(100.00).unscaledValue().toByteArray()));
+    void testBeforeStep() throws Exception {
+        // Arrange
+        when(sposConfig.bucket()).thenReturn("testBucket");
+        when(sposConfig.serviceKey()).thenReturn("testServiceKey");
+        when(arcataConfig.getEndpoint()).thenReturn(mock(Endpoint.class));
+        when(arcataConfig.getEndpoint().getUrl()).thenReturn("http://test-endpoint");
 
-        AggregateFactory.Aggregate result = sposItemProcessor.process(genericRecord);
+        // Act
+        listener.beforeStep(stepExecution);
 
-        assertEquals("householdingbalances", result.name());
-        assertEquals("sourceSchema", result.sourceSchema().name());
-        assertEquals("targetId", result.table().name());
-        assertEquals("12345", result.table().columns().get(0).metadata().value());
-        assertEquals(BigDecimal.valueOf(100.00).setScale(2), result.table().columns().get(1).metadata().value());
+        // Assert
+        verify(logRecordCreator, times(1)).toOutBound(
+                anyString(),
+                eq("stepExecutionStepName"),
+                eq(stepExecution.getStartTime()),
+                eq(Collections.singletonMap("Spos Bucket", "testBucket")),
+                isNull(),
+                eq(ServiceCallType.RPC),
+                eq("testServiceKey"),
+                eq("http://test-endpoint"),
+                eq("testPort"),
+                isNull()
+        );
     }
 
-    // Additional test cases for other scenarios can be added here
+    @Test
+    void testAfterStep() {
+        // Arrange
+        when(stepExecution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
 
+        // Act
+        ExitStatus exitStatus = listener.afterStep(stepExecution);
+
+        // Assert
+        assertEquals(ExitStatus.COMPLETED, exitStatus);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.config.ArcataConfig;
+import com.schwab.cdt.spos.source.config.SposConfig;
+import com.schwab.cdt.spos.source.logger.LogRecordCreator;
+import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.listener.StepExecutionListenerSupport;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+class DataIngestionStepExecutionListenerTest {
+
+    @InjectMocks
+    private DataIngestionStepExecutionListener listener;
+
+    @Mock
+    private SposConfig sposConfig;
+
+    @Mock
+    private ArcataConfig arcataConfig;
+
+    @Mock
+    private LogRecordCreator logRecordCreator;
+
+    @Mock
+    private StepExecution stepExecution;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void testBeforeStep() throws Exception {
+        // Arrange
+        when(sposConfig.bucket()).thenReturn("testBucket");
+        when(sposConfig.serviceKey()).thenReturn("testServiceKey");
+        when(sposConfig.port()).thenReturn("testPort");
+        when(arcataConfig.getEndpoint()).thenReturn(mock(Endpoint.class));
+        when(arcataConfig.getEndpoint().getUrl()).thenReturn("http://test-endpoint");
+        when(stepExecution.getStartTime()).thenReturn(LocalDateTime.now());
+        when(stepExecution.getStepName()).thenReturn("stepExecutionStepName");
+
+        // Act
+        listener.beforeStep(stepExecution);
+
+        // Assert
+        verify(logRecordCreator, times(1)).toOutBound(
+                anyString(),
+                eq("stepExecutionStepName"),
+                any(),
+                eq(Collections.singletonMap("Spos Bucket", "testBucket")),
+                isNull(),
+                eq(ServiceCallType.RPC),
+                eq("testServiceKey"),
+                eq("http://test-endpoint"),
+                eq("testPort"),
+                isNull()
+        );
+    }
+
+    @Test
+    void testAfterStep() {
+        // Arrange
+        when(stepExecution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
+
+        // Act
+        ExitStatus exitStatus = listener.afterStep(stepExecution);
+
+        // Assert
+        assertEquals(ExitStatus.COMPLETED, exitStatus);
+    }
 }

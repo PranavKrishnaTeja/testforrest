@@ -1,67 +1,52 @@
-package com.schwab.cdt.spos.source.job.step;
+package com.schwab.cdt.spos.source.service;
 
-import com.schwab.cdt.spos.source.config.ArcataConfig;
-import com.schwab.cdt.spos.source.config.SposConfig;
-import com.schwab.cdt.spos.source.logger.LogRecordCreator;
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.StepExecution;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import schwab.discovery.client.EndpointNotFoundException;
+import schwab.discovery.client.ServiceRegistryException;
+
+import java.io.IOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-class DataIngestionStepExecutionListenerTest {
-
-    @InjectMocks
-    private DataIngestionStepExecutionListener listener;
+class StreamServiceTest {
 
     @Mock
-    private SposConfig sposConfig;
+    private SposStreamingClient sposStreamingClient;
 
-    @Mock
-    private ArcataConfig arcataConfig;
+    private PipedInputStream pipedInputStream;
+    private PipedOutputStream pipedOutputStream;
 
-    @Mock
-    private LogRecordCreator logRecordCreator;
+    private StreamService streamService;
 
-    @Mock
-    private StepExecution stepExecution;
+    private final String documentId = "testDocumentId";
+    private final long fileSize = 100L;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws EndpointNotFoundException, IOException, ServiceRegistryException {
         MockitoAnnotations.openMocks(this);
+        pipedInputStream = new PipedInputStream();
+        pipedOutputStream = new PipedOutputStream(pipedInputStream);
+        when(sposStreamingClient.getObjectSize(documentId)).thenReturn(fileSize);
+        when(sposStreamingClient.getObjectWithByteRange(eq(documentId), anyLong(), anyLong())).thenReturn(new byte[10]);
+        streamService = new StreamService(sposStreamingClient, pipedInputStream, documentId);
     }
 
     @Test
-    void beforeStep_shouldLogStepNameAndFailureExceptions() {
-        // Arrange
-        when(sposConfig.bucket()).thenReturn("testBucket");
-        when(sposConfig.serviceKey()).thenReturn("testServiceKey");
-        when(sposConfig.port()).thenReturn("testPort");
-        when(arcataConfig.getEndpoint()).thenReturn(mock(Endpoint.class));
-        when(arcataConfig.getEndpoint().getUrl()).thenReturn("http://test-endpoint");
-        when(stepExecution.getStartTime()).thenReturn(LocalDateTime.now());
-        when(stepExecution.getStepName()).thenReturn("stepExecutionStepName");
+    void run() throws IOException, InterruptedException {
+        Thread streamThread = new Thread(streamService);
+        streamThread.start();
+        streamThread.join(); // Wait for the thread to complete
 
-        // Act
-        listener.beforeStep(stepExecution);
-
-        // Assert
-        verify(logRecordCreator, times(1)).toOutBound(any(), eq("stepExecutionStepName"), any(), anyMap(), isNull(), eq(ServiceCallType.RPC), eq("testServiceKey"), eq("http://test-endpoint"), eq("testPort"), isNull());
-    }
-
-    @Test
-    void afterStep_shouldReturnExitStatus() {
-        // Arrange
-        ExitStatus exitStatus = ExitStatus.COMPLETED;
-        when(stepExecution.getExitStatus()).thenReturn(exitStatus);
-
-        // Act
-        ExitStatus result = listener.afterStep(stepExecution);
-
-        // Assert
-        assertEquals(exitStatus, result);
+        verify(sposStreamingClient, times((int) Math.ceil(fileSize / (double) StreamService.CHUNK_SIZE))).getObjectWithByteRange(eq(documentId), anyLong(), anyLong());
+        assertEquals(0, pipedInputStream.available(), "PipedInputStream should be empty after streaming");
     }
 }

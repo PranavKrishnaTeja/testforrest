@@ -1,52 +1,112 @@
 package com.schwab.cdt.spos.source.service;
 
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import com.schwab.cdt.spos.source.config.IngestionJobConfig;
+import com.schwab.cdt.spos.source.job.DataIngestionJobBuilder;
+import com.schwab.cdt.spos.source.job.DataIngestionJobListener;
+import com.schwab.cdt.spos.source.logger.LogRecordCreator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import schwab.discovery.client.EndpointNotFoundException;
-import schwab.discovery.client.ServiceRegistryException;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersInvalidException;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.core.repository.JobRestartException;
+import org.springframework.context.ApplicationContext;
 
-import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class StreamServiceTest {
+@ExtendWith(MockitoExtension.class)
+public class BatchServiceTest {
 
     @Mock
-    private SposStreamingClient sposStreamingClient;
+    private JobLauncher jobLauncher;
 
     @Mock
-    private PipedInputStream pipedInputStream;
+    private IngestionJobConfig ingestionJobConfig;
 
     @Mock
-    private PipedOutputStream pipedOutputStream;
+    private DataIngestionJobBuilder dataIngestionJobBuilder;
 
-    private StreamService streamService;
+    @Mock
+    private LogRecordCreator logRecordCreator;
 
-    private final String documentId = "testDocumentId";
-    private final long fileSize = 100L;
+    @Mock
+    private ApplicationContext applicationContext;
+
+    @Mock
+    private DataIngestionJobListener dataIngestionJobListener;
+
+    @InjectMocks
+    private BatchService batchService;
 
     @BeforeEach
-    void setUp() throws EndpointNotFoundException, IOException, ServiceRegistryException {
-        MockitoAnnotations.openMocks(this);
-        when(sposStreamingClient.getObjectSize(documentId)).thenReturn(fileSize);
-        when(sposStreamingClient.getObjectWithByteRange(eq(documentId), anyLong(), anyLong())).thenReturn(new byte[10]);
-        streamService = new StreamService(sposStreamingClient, pipedInputStream, documentId);
+    void setUp() {
+        batchService = new BatchService(jobLauncher, dataIngestionJobBuilder, ingestionJobConfig);
     }
 
     @Test
-    void run() throws IOException, InterruptedException {
-        Thread streamThread = new Thread(streamService);
-        streamThread.start();
-        streamThread.join(); // Wait for the thread to complete
+    void testStartPostgresJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
+        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "postgres", "sourceDocId", "targetId");
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
 
-        verify(sposStreamingClient, times((int) Math.ceil(fileSize / (double) StreamService.CHUNK_SIZE))).getObjectWithByteRange(eq(documentId), anyLong(), anyLong());
-        verify(pipedOutputStream, never()).connect(any(PipedInputStream.class)); // Ensure it's not connecting inappropriately
+        Job postgresJob = mock(Job.class);
+        when(dataIngestionJobBuilder.postgresDataIngestionJob()).thenReturn(postgresJob);
+
+        batchService.start("testJob");
+
+        verify(jobLauncher).run(eq(postgresJob), any(JobParameters.class));
+    }
+
+    @Test
+    void testStartCassandraJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
+        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "cassandra", "sourceDocId", "targetId");
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
+
+        Job cassandraJob = mock(Job.class);
+        when(dataIngestionJobBuilder.cassandraDataIngestionJob()).thenReturn(cassandraJob);
+
+        batchService.start("testJob");
+
+        verify(jobLauncher).run(eq(cassandraJob), any(JobParameters.class));
+    }
+
+    @Test
+    void testStartJobNotFound() {
+        when(ingestionJobConfig.jobs()).thenReturn(List.of());
+
+        assertThrows(UnsupportedOperationException.class, () -> batchService.start("unknownJob"));
+    }
+
+    @Test
+    void testBuildDocumentId() {
+        String documentId = batchService.buildDocumentId("testJob");
+        assertEquals("testjob_" + LocalDate.now() + ".avro", documentId);
+    }
+
+    @Test
+    void testJobLookUpWithMetadata() {
+        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "target", "sourceDocId", "targetId");
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
+
+        Map<String, String> metadata = batchService.jobLookUpWithMetadata("testJob");
+
+        assertEquals("testJob", metadata.get("jobName"));
+        assertEquals("source", metadata.get("source"));
+        assertEquals("target", metadata.get("target"));
+        assertEquals(batchService.buildDocumentId("sourceDocId"), metadata.get("documentId"));
+        assertEquals("targetId", metadata.get("targetId"));
     }
 }

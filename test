@@ -56,7 +56,8 @@ class CassandraItemWriterTest {
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
         setupBoundStatementMock();
 
-        CompletionStage<AsyncResultSet> mockCompletionStage = CompletableFuture.completedFuture(mock(AsyncResultSet.class));
+        // Properly initializing the CompletionStage to avoid NullPointerException
+        CompletableFuture<AsyncResultSet> mockCompletionStage = CompletableFuture.completedFuture(mock(AsyncResultSet.class));
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
 
         assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
@@ -73,7 +74,9 @@ class CassandraItemWriterTest {
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
         setupBoundStatementMock();
 
-        CompletionStage<AsyncResultSet> mockCompletionStage = CompletableFuture.failedFuture(new RuntimeException("Simulated Exception"));
+        // Simulate an exception during async execution
+        CompletableFuture<AsyncResultSet> mockCompletionStage = new CompletableFuture<>();
+        mockCompletionStage.completeExceptionally(new RuntimeException("Simulated Exception"));
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
 
         assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));

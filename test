@@ -108,3 +108,138 @@ class CassandraItemWriterTest {
         when(mockBoundStatement.setString(anyString(), anyString())).thenReturn(mockBoundStatement);
     }
 }
+
+
+
+
+
+
+
+
+
+package com.schwab.cdt.spos.source.job;
+
+import com.schwab.cdt.spos.source.logger.LogRecordCreator;
+import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.JobInstance;
+import org.springframework.batch.core.ExitStatus;
+
+import java.time.LocalDateTime;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.*;
+
+class DataIngestionJobListenerTest {
+
+    @Mock
+    private LogRecordCreator logRecordCreator;
+
+    @Mock
+    private ApplicationContext applicationContext;
+
+    private DataIngestionJobListener dataIngestionJobListener;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        dataIngestionJobListener = new DataIngestionJobListener(logRecordCreator, applicationContext);
+    }
+
+    @Test
+    void beforeJob_logsInboundMessage() {
+        JobExecution jobExecution = mock(JobExecution.class);
+        JobInstance jobInstance = mock(JobInstance.class);
+        when(jobExecution.getJobInstance()).thenReturn(jobInstance);
+        when(jobInstance.getJobName()).thenReturn("testJob");
+        when(jobExecution.getStartTime()).thenReturn(new Date());
+
+        dataIngestionJobListener.beforeJob(jobExecution);
+
+        verify(logRecordCreator, times(1)).toInbound(
+            eq("Job has started with id: " + jobExecution.getJobId()),
+            eq("ControlM Pcf Task"),
+            eq(jobExecution.getStartTime()),
+            anyMap(),
+            isNull(),
+            eq(ServiceCallType.RPC),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull()
+        );
+    }
+
+    @Test
+    void afterJob_logsOutboundMessage_andExitsApplicationOnFailure() {
+        JobExecution jobExecution = mock(JobExecution.class);
+        StepExecution stepExecution = mock(StepExecution.class);
+        Set<StepExecution> stepExecutions = new HashSet<>();
+        stepExecutions.add(stepExecution);
+
+        when(jobExecution.getStepExecutions()).thenReturn(stepExecutions);
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
+        when(jobExecution.getStartTime()).thenReturn(new Date());
+        when(jobExecution.getEndTime()).thenReturn(new Date());
+
+        dataIngestionJobListener.afterJob(jobExecution);
+
+        verify(logRecordCreator, times(1)).toOutBound(
+            eq("Job has finished with exit status: " + jobExecution.getExitStatus().getExitCode() +
+                " and message: " + jobExecution.getExitStatus().getExitDescription()),
+            eq("ControlM Pcf Task"),
+            eq(jobExecution.getStartTime()),
+            anyMap(),
+            isNull(),
+            eq(ServiceCallType.RPC),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull()
+        );
+
+        verify(applicationContext, times(1)).close();
+    }
+
+    @Test
+    void afterJob_logsOutboundMessage_andExitsApplicationOnSuccess() {
+        JobExecution jobExecution = mock(JobExecution.class);
+        StepExecution stepExecution = mock(StepExecution.class);
+        Set<StepExecution> stepExecutions = new HashSet<>();
+        stepExecutions.add(stepExecution);
+
+        when(jobExecution.getStepExecutions()).thenReturn(stepExecutions);
+        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
+        when(jobExecution.getStartTime()).thenReturn(new Date());
+        when(jobExecution.getEndTime()).thenReturn(new Date());
+
+        dataIngestionJobListener.afterJob(jobExecution);
+
+        verify(logRecordCreator, times(1)).toOutBound(
+            eq("Job has finished with exit status: " + jobExecution.getExitStatus().getExitCode() +
+                " and message: " + jobExecution.getExitStatus().getExitDescription()),
+            eq("ControlM Pcf Task"),
+            eq(jobExecution.getStartTime()),
+            anyMap(),
+            isNull(),
+            eq(ServiceCallType.RPC),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull()
+        );
+
+        verify(applicationContext, times(1)).close();
+    }
+}

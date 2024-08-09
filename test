@@ -88,10 +88,7 @@ class CassandraItemWriterTest {
     }
 
     private void setupBoundStatementMock() {
-        // Mock the BoundStatement to return itself when set methods are called
-        when(mockBoundStatement.set(anyString(), any(BigInteger.class))).thenReturn(mockBoundStatement);
-        when(mockBoundStatement.set(anyString(), any(BigDecimal.class))).thenReturn(mockBoundStatement);
-        when(mockBoundStatement.set(anyString(), anyString())).thenReturn(mockBoundStatement);
-        when(mockBoundStatement.set(anyString(), any(Instant.class), any(Class.class))).thenReturn(mockBoundStatement);
+        // Mock the BoundStatement to return itself when positional or named bind methods are called
+        when(mockBoundStatement.bind(any(BigInteger.class), any(BigDecimal.class), anyString(), any(Instant.class))).thenReturn(mockBoundStatement);
     }
 }

@@ -18,6 +18,8 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,7 +52,7 @@ class CassandraItemWriterTest {
     }
 
     @Test
-    void testWriteSuccess() {
+    void testWriteSuccess() throws ExecutionException, InterruptedException {
         AggregateFactory.Aggregate mockAggregate = createMockAggregate();
         Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
@@ -60,13 +62,20 @@ class CassandraItemWriterTest {
 
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
 
+        // Mock the behavior of whenComplete
+        doAnswer(invocation -> {
+            invocation.getArgument(0, BiConsumer.class)
+                      .accept(mock(AsyncResultSet.class), null);
+            return mockCompletionStage;
+        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
+
         assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
 
         verify(mockSession, times(1)).executeAsync(any(BoundStatement.class));
     }
 
     @Test
-    void testWriteFailure() {
+    void testWriteFailure() throws ExecutionException, InterruptedException {
         AggregateFactory.Aggregate mockAggregate = createMockAggregate();
         Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
@@ -74,7 +83,14 @@ class CassandraItemWriterTest {
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
         setupBoundStatementMock();
 
-        when(mockSession.executeAsync(any(BoundStatement.class))).thenThrow(new UnableToWriteToCassandraException("Test exception"));
+        when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
+
+        // Simulate an exception during the whenComplete phase
+        doAnswer(invocation -> {
+            invocation.getArgument(0, BiConsumer.class)
+                      .accept(null, new RuntimeException("Simulated Exception"));
+            return mockCompletionStage;
+        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
 
         assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
     }

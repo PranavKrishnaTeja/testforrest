@@ -8,7 +8,6 @@ import com.schwab.cdt.spos.source.exception.UnableToWriteToCassandraException;
 import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.batch.item.Chunk;
@@ -57,7 +56,8 @@ class CassandraItemWriterTest {
 
         when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
-        when(mockBoundStatement.set(anyString(), any(), any(Class.class))).thenReturn(mockBoundStatement);
+        mockBoundStatement = mockBoundStatement();
+
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
 
         assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
@@ -72,7 +72,8 @@ class CassandraItemWriterTest {
 
         when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
-        when(mockBoundStatement.set(anyString(), any(), any(Class.class))).thenReturn(mockBoundStatement);
+        mockBoundStatement = mockBoundStatement();
+
         when(mockSession.executeAsync(any(BoundStatement.class))).thenThrow(new UnableToWriteToCassandraException("Test exception"));
 
         assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
@@ -84,5 +85,16 @@ class CassandraItemWriterTest {
         AggregateFactory.Table table = new AggregateFactory.Table("test_table", Arrays.asList(column1, column2));
 
         return new AggregateFactory.Aggregate("testAggregate", new AggregateFactory.SourceSchema("testSchema"), table, "testSql");
+    }
+
+    private BoundStatement mockBoundStatement() {
+        // Mock the BoundStatement to return itself when set methods are called
+        BoundStatement boundStatement = mock(BoundStatement.class);
+        when(boundStatement.set(anyString(), any(BigInteger.class))).thenReturn(boundStatement);
+        when(boundStatement.set(anyString(), any(BigDecimal.class))).thenReturn(boundStatement);
+        when(boundStatement.set(anyString(), anyString())).thenReturn(boundStatement);
+        when(boundStatement.set(anyString(), any(Instant.class), any(Class.class))).thenReturn(boundStatement);
+
+        return boundStatement;
     }
 }

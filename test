@@ -1,95 +1,88 @@
-import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
-import com.schwab.pce.common.logging.eli.LogRecord;
-import com.schwab.pce.slf4j.logging.EliLogger;
-import com.schwab.cdt.spos.source.config.LoggingConfig;
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
+import com.datastax.oss.driver.api.core.cql.BoundStatement;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
+import com.schwab.cdt.spos.source.exception.UnableToWriteToCassandraException;
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.batch.item.Chunk;
 
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.CompletionStage;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
-class LogRecordCreatorTest {
-
-    @Mock
-    private EliLogger eliLogger;
+class CassandraItemWriterTest {
 
     @Mock
-    private LoggingConfig loggingConfig;
+    private CqlSession mockSession;
 
-    @InjectMocks
-    private LogRecordCreator logRecordCreator;
+    @Mock
+    private CassandraConfig mockCassandraConfig;
+
+    @Mock
+    private PreparedStatement mockPreparedStatement;
+
+    @Mock
+    private BoundStatement mockBoundStatement;
+
+    @Mock
+    private CompletionStage<AsyncResultSet> mockCompletionStage;
+
+    private CassandraItemWriter cassandraItemWriter;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(mockCassandraConfig.maxConcurrentWriteRequests()).thenReturn(100);
+        cassandraItemWriter = new CassandraItemWriter(mockSession, mockCassandraConfig);
     }
 
     @Test
-    void testToOutbound() {
-        // Arrange
-        String message = "Outbound test message";
-        String operation = "testOperation";
-        LocalDateTime executionStartTime = LocalDateTime.now();
-        Map<String, Object> data = new HashMap<>();
-        Exception ex = null;
-        ServiceCallType serviceCallType = ServiceCallType.REST;
-        String serviceKey = "testServiceKey";
-        String url = "testUrl";
-        String port = "8080";
-        Long byteSent = 1024L;
+    void testWriteSuccess() {
+        AggregateFactory.Aggregate mockAggregate = createMockAggregate();
+        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
-        // Act
-        logRecordCreator.toOutBound(message, operation, executionStartTime, data, ex, serviceCallType, serviceKey, url, port, byteSent);
+        when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
+        when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
+        when(mockBoundStatement.set(anyString(), any(), any(Class.class))).thenReturn(mockBoundStatement);
+        when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
 
-        // Assert
-        ArgumentCaptor<LogRecord> logRecordCaptor = ArgumentCaptor.forClass(LogRecord.class);
-        verify(eliLogger).log(logRecordCaptor.capture());
-        LogRecord capturedLogRecord = logRecordCaptor.getValue();
+        assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
 
-        assertEquals(message, capturedLogRecord.getResults().getMessage());
-        assertEquals(serviceCallType, capturedLogRecord.getService().getServiceCallType());
-        assertEquals(serviceKey, capturedLogRecord.getService().getServiceKey());
-        assertEquals(url, capturedLogRecord.getService().getUrl());
-        assertEquals(port, capturedLogRecord.getService().getPort());
-        assertEquals(byteSent, capturedLogRecord.getService().getBytesSent());
+        verify(mockSession, times(1)).executeAsync(any(BoundStatement.class));
     }
 
     @Test
-    void testToInbound() {
-        // Arrange
-        String message = "Inbound test message";
-        String operation = "testOperation";
-        LocalDateTime executionStartTime = LocalDateTime.now();
-        Map<String, Object> data = new HashMap<>();
-        Exception ex = null;
-        ServiceCallType serviceCallType = ServiceCallType.RPC;
-        String serviceKey = "testServiceKey";
-        String url = "testUrl";
-        String port = "8080";
-        Long byteSent = 2048L;
+    void testWriteFailure() {
+        AggregateFactory.Aggregate mockAggregate = createMockAggregate();
+        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
-        // Act
-        logRecordCreator.toInbound(message, operation, executionStartTime, data, ex, serviceCallType, serviceKey, url, port, byteSent);
+        when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
+        when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
+        when(mockBoundStatement.set(anyString(), any(), any(Class.class))).thenReturn(mockBoundStatement);
+        when(mockSession.executeAsync(any(BoundStatement.class))).thenThrow(new UnableToWriteToCassandraException("Test exception"));
 
-        // Assert
-        ArgumentCaptor<LogRecord> logRecordCaptor = ArgumentCaptor.forClass(LogRecord.class);
-        verify(eliLogger).log(logRecordCaptor.capture());
-        LogRecord capturedLogRecord = logRecordCaptor.getValue();
+        assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
+    }
 
-        assertEquals(message, capturedLogRecord.getResults().getMessage());
-        assertEquals(serviceCallType, capturedLogRecord.getService().getServiceCallType());
-        assertEquals(serviceKey, capturedLogRecord.getService().getServiceKey());
-        assertEquals(url, capturedLogRecord.getService().getUrl());
-        assertEquals(port, capturedLogRecord.getService().getPort());
-        assertEquals(byteSent, capturedLogRecord.getService().getBytesSent());
+    private AggregateFactory.Aggregate createMockAggregate() {
+        AggregateFactory.Columns column1 = new AggregateFactory.Columns("column1", new AggregateFactory.Metadata(new BigInteger("12345"), "bigint", "source1", null, null));
+        AggregateFactory.Columns column2 = new AggregateFactory.Columns("column2", new AggregateFactory.Metadata(new BigDecimal("123.45"), "decimal", "source2", null, 2));
+        AggregateFactory.Table table = new AggregateFactory.Table("test_table", Arrays.asList(column1, column2));
+
+        return new AggregateFactory.Aggregate("testAggregate", new AggregateFactory.SourceSchema("testSchema"), table, "testSql");
     }
 }

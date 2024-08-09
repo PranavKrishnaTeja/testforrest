@@ -17,9 +17,8 @@ import java.math.BigInteger;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,9 +38,6 @@ class CassandraItemWriterTest {
     @Mock
     private BoundStatement mockBoundStatement;
 
-    @Mock
-    private CompletionStage<AsyncResultSet> mockCompletionStage;
-
     private CassandraItemWriter cassandraItemWriter;
 
     @BeforeEach
@@ -52,7 +48,7 @@ class CassandraItemWriterTest {
     }
 
     @Test
-    void testWriteSuccess() throws ExecutionException, InterruptedException {
+    void testWriteSuccess() {
         AggregateFactory.Aggregate mockAggregate = createMockAggregate();
         Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
@@ -60,14 +56,8 @@ class CassandraItemWriterTest {
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
         setupBoundStatementMock();
 
+        CompletionStage<AsyncResultSet> mockCompletionStage = CompletableFuture.completedFuture(mock(AsyncResultSet.class));
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
-
-        // Mock the behavior of whenComplete
-        doAnswer(invocation -> {
-            invocation.getArgument(0, BiConsumer.class)
-                      .accept(mock(AsyncResultSet.class), null);
-            return mockCompletionStage;
-        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
 
         assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
 
@@ -75,7 +65,7 @@ class CassandraItemWriterTest {
     }
 
     @Test
-    void testWriteFailure() throws ExecutionException, InterruptedException {
+    void testWriteFailure() {
         AggregateFactory.Aggregate mockAggregate = createMockAggregate();
         Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
 
@@ -83,14 +73,8 @@ class CassandraItemWriterTest {
         when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
         setupBoundStatementMock();
 
+        CompletionStage<AsyncResultSet> mockCompletionStage = CompletableFuture.failedFuture(new RuntimeException("Simulated Exception"));
         when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
-
-        // Simulate an exception during the whenComplete phase
-        doAnswer(invocation -> {
-            invocation.getArgument(0, BiConsumer.class)
-                      .accept(null, new RuntimeException("Simulated Exception"));
-            return mockCompletionStage;
-        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
 
         assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
     }
@@ -104,7 +88,6 @@ class CassandraItemWriterTest {
     }
 
     private void setupBoundStatementMock() {
-        // Mock the BoundStatement to return itself when the set methods are called
         when(mockBoundStatement.setBigDecimal(anyString(), any(BigDecimal.class))).thenReturn(mockBoundStatement);
         when(mockBoundStatement.setBigInteger(anyString(), any(BigInteger.class))).thenReturn(mockBoundStatement);
         when(mockBoundStatement.setInstant(anyString(), any(Instant.class))).thenReturn(mockBoundStatement);

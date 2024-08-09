@@ -1,109 +1,95 @@
-package com.schwab.cdt.spos.source.service;
-
-import com.schwab.cdt.spos.source.config.IngestionJobConfig;
-import com.schwab.cdt.spos.source.job.DataIngestionJobBuilder;
-import com.schwab.cdt.spos.source.logger.LogRecordCreator;
+import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
+import com.schwab.pce.common.logging.eli.LogRecord;
+import com.schwab.pce.slf4j.logging.EliLogger;
+import com.schwab.cdt.spos.source.config.LoggingConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobParameters;
-import org.springframework.batch.core.JobParametersInvalidException;
-import org.springframework.batch.core.launch.JobLauncher;
-import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
-import org.springframework.batch.core.repository.JobInstanceAlreadyCompleteException;
-import org.springframework.batch.core.repository.JobRestartException;
+import org.mockito.MockitoAnnotations;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.verify;
 
-@ExtendWith(MockitoExtension.class)
-public class BatchServiceTest {
-
-    @Mock
-    private JobLauncher jobLauncher;
+class LogRecordCreatorTest {
 
     @Mock
-    private IngestionJobConfig ingestionJobConfig;
+    private EliLogger eliLogger;
 
     @Mock
-    private DataIngestionJobBuilder dataIngestionJobBuilder;
-
-    @Mock
-    private LogRecordCreator logRecordCreator;
+    private LoggingConfig loggingConfig;
 
     @InjectMocks
-    private BatchService batchService;
+    private LogRecordCreator logRecordCreator;
 
     @BeforeEach
     void setUp() {
-        // Initialize the service with mocks
-        batchService = new BatchService(jobLauncher, dataIngestionJobBuilder, ingestionJobConfig, logRecordCreator);
+        MockitoAnnotations.openMocks(this);
     }
 
     @Test
-    void testStartPostgresJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
-        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "postgres", "sourceDocId", "targetId");
-        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
+    void testToOutbound() {
+        // Arrange
+        String message = "Outbound test message";
+        String operation = "testOperation";
+        LocalDateTime executionStartTime = LocalDateTime.now();
+        Map<String, Object> data = new HashMap<>();
+        Exception ex = null;
+        ServiceCallType serviceCallType = ServiceCallType.REST;
+        String serviceKey = "testServiceKey";
+        String url = "testUrl";
+        String port = "8080";
+        Long byteSent = 1024L;
 
-        Job postgresJob = mock(Job.class);
-        when(dataIngestionJobBuilder.postgresDataIngestionJob()).thenReturn(postgresJob);
+        // Act
+        logRecordCreator.toOutBound(message, operation, executionStartTime, data, ex, serviceCallType, serviceKey, url, port, byteSent);
 
-        batchService.start("testJob");
+        // Assert
+        ArgumentCaptor<LogRecord> logRecordCaptor = ArgumentCaptor.forClass(LogRecord.class);
+        verify(eliLogger).log(logRecordCaptor.capture());
+        LogRecord capturedLogRecord = logRecordCaptor.getValue();
 
-        verify(jobLauncher).run(eq(postgresJob), any(JobParameters.class));
-        verify(logRecordCreator).toOutBound(anyString(), anyString(), any(LocalDateTime.class), any(), any(), any(), any(), any(), any(), any());
+        assertEquals(message, capturedLogRecord.getResults().getMessage());
+        assertEquals(serviceCallType, capturedLogRecord.getService().getServiceCallType());
+        assertEquals(serviceKey, capturedLogRecord.getService().getServiceKey());
+        assertEquals(url, capturedLogRecord.getService().getUrl());
+        assertEquals(port, capturedLogRecord.getService().getPort());
+        assertEquals(byteSent, capturedLogRecord.getService().getBytesSent());
     }
 
     @Test
-    void testStartCassandraJob() throws JobInstanceAlreadyCompleteException, JobExecutionAlreadyRunningException, JobParametersInvalidException, JobRestartException {
-        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "cassandra", "sourceDocId", "targetId");
-        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
+    void testToInbound() {
+        // Arrange
+        String message = "Inbound test message";
+        String operation = "testOperation";
+        LocalDateTime executionStartTime = LocalDateTime.now();
+        Map<String, Object> data = new HashMap<>();
+        Exception ex = null;
+        ServiceCallType serviceCallType = ServiceCallType.RPC;
+        String serviceKey = "testServiceKey";
+        String url = "testUrl";
+        String port = "8080";
+        Long byteSent = 2048L;
 
-        Job cassandraJob = mock(Job.class);
-        when(dataIngestionJobBuilder.cassandraDataIngestionJob()).thenReturn(cassandraJob);
+        // Act
+        logRecordCreator.toInbound(message, operation, executionStartTime, data, ex, serviceCallType, serviceKey, url, port, byteSent);
 
-        batchService.start("testJob");
+        // Assert
+        ArgumentCaptor<LogRecord> logRecordCaptor = ArgumentCaptor.forClass(LogRecord.class);
+        verify(eliLogger).log(logRecordCaptor.capture());
+        LogRecord capturedLogRecord = logRecordCaptor.getValue();
 
-        verify(jobLauncher).run(eq(cassandraJob), any(JobParameters.class));
-        verify(logRecordCreator).toOutBound(anyString(), anyString(), any(LocalDateTime.class), any(), any(), any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void testStartJobNotFound() {
-        when(ingestionJobConfig.jobs()).thenReturn(List.of());
-
-        assertThrows(UnsupportedOperationException.class, () -> batchService.start("unknownJob"));
-    }
-
-    @Test
-    void testBuildDocumentId() {
-        String documentId = BatchService.buildDocumentId("testJob");
-        assertEquals("testjob_" + LocalDate.now() + ".avro", documentId);
-    }
-
-    @Test
-    void testJobLookUpWithMetadata() {
-        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "source", "target", "sourceDocId", "targetId");
-        when(ingestionJobConfig.jobs()).thenReturn(List.of(jobConfig));
-
-        Map<String, String> metadata = batchService.jobLookUpWithMetadata("testJob");
-
-        assertEquals("testJob", metadata.get("jobName"));
-        assertEquals("source", metadata.get("source"));
-        assertEquals("target", metadata.get("target"));
-        assertEquals(BatchService.buildDocumentId("sourceDocId"), metadata.get("documentId"));
-        assertEquals("targetId", metadata.get("targetId"));
+        assertEquals(message, capturedLogRecord.getResults().getMessage());
+        assertEquals(serviceCallType, capturedLogRecord.getService().getServiceCallType());
+        assertEquals(serviceKey, capturedLogRecord.getService().getServiceKey());
+        assertEquals(url, capturedLogRecord.getService().getUrl());
+        assertEquals(port, capturedLogRecord.getService().getPort());
+        assertEquals(byteSent, capturedLogRecord.getService().getBytesSent());
     }
 }

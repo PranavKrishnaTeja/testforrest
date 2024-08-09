@@ -1,44 +1,110 @@
-@Test
-void testWriteSuccess() {
-    AggregateFactory.Aggregate mockAggregate = createMockAggregate();
-    Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
+import com.datastax.oss.driver.api.core.cql.BoundStatement;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
+import com.schwab.cdt.spos.source.exception.UnableToWriteToCassandraException;
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.item.Chunk;
 
-    when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
-    when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
-    setupBoundStatementMock();
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
-    // Properly initializing the CompletionStage to avoid NullPointerException
-    CompletableFuture<AsyncResultSet> mockCompletionStage = CompletableFuture.completedFuture(mock(AsyncResultSet.class));
-    when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
-    // Debugging statements
-    System.out.println("PreparedStatement: " + mockPreparedStatement);
-    System.out.println("BoundStatement: " + mockBoundStatement);
-    System.out.println("CompletionStage: " + mockCompletionStage);
+class CassandraItemWriterTest {
 
-    assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
+    @Mock
+    private CqlSession mockSession;
 
-    verify(mockSession, times(1)).executeAsync(any(BoundStatement.class));
-}
+    @Mock
+    private CassandraConfig mockCassandraConfig;
 
-@Test
-void testWriteFailure() {
-    AggregateFactory.Aggregate mockAggregate = createMockAggregate();
-    Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
+    @Mock
+    private PreparedStatement mockPreparedStatement;
 
-    when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
-    when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
-    setupBoundStatementMock();
+    @Mock
+    private BoundStatement mockBoundStatement;
 
-    // Simulate an exception during async execution
-    CompletableFuture<AsyncResultSet> mockCompletionStage = new CompletableFuture<>();
-    mockCompletionStage.completeExceptionally(new RuntimeException("Simulated Exception"));
-    when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
+    private CassandraItemWriter cassandraItemWriter;
 
-    // Debugging statements
-    System.out.println("PreparedStatement: " + mockPreparedStatement);
-    System.out.println("BoundStatement: " + mockBoundStatement);
-    System.out.println("CompletionStage: " + mockCompletionStage);
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(mockCassandraConfig.maxConcurrentWriteRequests()).thenReturn(100);
+        cassandraItemWriter = new CassandraItemWriter(mockSession, mockCassandraConfig);
+    }
 
-    assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
+    @Test
+    void testWriteSuccess() {
+        AggregateFactory.Aggregate mockAggregate = createMockAggregate();
+        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
+
+        when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
+        when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
+        setupBoundStatementMock();
+
+        // Mock the CompletionStage and its behavior
+        CompletableFuture<AsyncResultSet> mockCompletionStage = CompletableFuture.completedFuture(mock(AsyncResultSet.class));
+        when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
+
+        doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            ((BiConsumer<AsyncResultSet, Throwable>) args[0]).accept(mock(AsyncResultSet.class), null);
+            return null;
+        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
+
+        assertDoesNotThrow(() -> cassandraItemWriter.write(chunk));
+
+        verify(mockSession, times(1)).executeAsync(any(BoundStatement.class));
+    }
+
+    @Test
+    void testWriteFailure() {
+        AggregateFactory.Aggregate mockAggregate = createMockAggregate();
+        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Collections.singletonList(mockAggregate));
+
+        when(mockSession.prepare(any(SimpleStatement.class))).thenReturn(mockPreparedStatement);
+        when(mockPreparedStatement.bind()).thenReturn(mockBoundStatement);
+        setupBoundStatementMock();
+
+        // Simulate an exception during async execution
+        CompletableFuture<AsyncResultSet> mockCompletionStage = new CompletableFuture<>();
+        when(mockSession.executeAsync(any(BoundStatement.class))).thenReturn(mockCompletionStage);
+
+        doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            ((BiConsumer<AsyncResultSet, Throwable>) args[0]).accept(null, new RuntimeException("Simulated Exception"));
+            return null;
+        }).when(mockCompletionStage).whenComplete(any(BiConsumer.class));
+
+        assertThrows(UnableToWriteToCassandraException.class, () -> cassandraItemWriter.write(chunk));
+    }
+
+    private AggregateFactory.Aggregate createMockAggregate() {
+        AggregateFactory.Columns column1 = new AggregateFactory.Columns("column1", new AggregateFactory.Metadata(new BigInteger("12345"), "bigint", "source1", null, null));
+        AggregateFactory.Columns column2 = new AggregateFactory.Columns("column2", new AggregateFactory.Metadata(new BigDecimal("123.45"), "decimal", "source2", null, 2));
+        AggregateFactory.Table table = new AggregateFactory.Table("test_table", Arrays.asList(column1, column2));
+
+        return new AggregateFactory.Aggregate("testAggregate", new AggregateFactory.SourceSchema("testSchema"), table, "testSql");
+    }
+
+    private void setupBoundStatementMock() {
+        when(mockBoundStatement.setBigDecimal(anyString(), any(BigDecimal.class))).thenReturn(mockBoundStatement);
+        when(mockBoundStatement.setBigInteger(anyString(), any(BigInteger.class))).thenReturn(mockBoundStatement);
+        when(mockBoundStatement.setInstant(anyString(), any(Instant.class))).thenReturn(mockBoundStatement);
+        when(mockBoundStatement.setString(anyString(), anyString())).thenReturn(mockBoundStatement);
+    }
 }

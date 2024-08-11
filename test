@@ -47,14 +47,15 @@ class CassandraItemWriterTest {
         // Create a real SimpleStatement
         SimpleStatement simpleStatement = SimpleStatement.newInstance("INSERT INTO test_table (column1) VALUES (?)");
 
-        // Prepare the statement using the session
+        // Mock the session to return a PreparedStatement when preparing the SimpleStatement
         preparedStatement = mock(PreparedStatement.class);
         when(session.prepare(simpleStatement)).thenReturn(preparedStatement);
 
         // Create a real BoundStatement from the prepared statement
-        boundStatement = preparedStatement.bind(new BigDecimal("100.00"));
+        boundStatement = mock(BoundStatement.class);
+        when(preparedStatement.bind(any(BigDecimal.class))).thenReturn(boundStatement);
 
-        // Mocking the session and statement behaviors
+        // Mock the session to return our mocked PreparedStatement and BoundStatement
         when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
         when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
     }
@@ -85,7 +86,7 @@ class CassandraItemWriterTest {
         BoundStatement capturedStatement = boundStatementCaptor.getValue();
         assertEquals(boundStatement, capturedStatement);
 
-        // If you want to assert specific bound values, you could do so here
-        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal(0));
+        // Verify that the bound statement is set with the correct value
+        verify(boundStatement).setBigDecimal("column1", new BigDecimal("100.00"));
     }
 }

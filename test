@@ -1,8 +1,6 @@
 import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
 import com.schwab.cdt.spos.source.logger.LogRecordCreator;
 import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,8 +14,7 @@ import java.nio.file.Paths;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class SposItemReaderTest {
 
@@ -38,7 +35,7 @@ class SposItemReaderTest {
         // Arrange
         byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
         when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
-                .thenReturn(avroBytes);
+                .thenAnswer(invocation -> avroBytes);
 
         // Act
         sposItemReader.open(new ExecutionContext());
@@ -53,6 +50,38 @@ class SposItemReaderTest {
         return Files.readAllBytes(Paths.get(filePath));
     }
 
-    // Other tests...
+    // Additional Tests (if necessary)...
+    
+    @Test
+    void testRead() throws Exception {
+        // Arrange
+        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
+        when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
+                .thenAnswer(invocation -> avroBytes);
 
+        sposItemReader.open(new ExecutionContext());
+
+        // Act
+        GenericRecord result = sposItemReader.read();
+
+        // Assert
+        assertNotNull(result);
+        // Add more assertions here to check specific fields
+    }
+
+    @Test
+    void testClose() throws Exception {
+        // Arrange
+        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
+        when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
+                .thenAnswer(invocation -> avroBytes);
+
+        sposItemReader.open(new ExecutionContext());
+
+        // Act
+        sposItemReader.close();
+
+        // Assert
+        assertNull(sposItemReader.read()); // Ensure nothing can be read after closing
+    }
 }

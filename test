@@ -1,3 +1,27 @@
+@BeforeEach
+void setUp() {
+    MockitoAnnotations.openMocks(this);
+
+    // Mock the session to return a prepared statement when preparing a SimpleStatement
+    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
+
+    // Mock the prepared statement to return a bound statement when binding
+    when(preparedStatement.bind()).thenReturn(boundStatement);
+
+    // Mocking the BoundStatement setting behavior
+    when(boundStatement.set(anyString(), any(), any(Class.class))).thenReturn(boundStatement);
+
+    // Mock the session to return a CompletionStage when executing a BoundStatement
+    when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
+}
+
+
+
+
+
+
+
+
 @Test
 void testWrite() {
     // Arrange

@@ -10,6 +10,19 @@ import java.io.IOException;
 
 public class AvroFileToByteArrayConverter {
 
+    public static void main(String[] args) {
+        String filePath = "path/to/your/avrofile.avro"; // Replace with the path to your Avro file
+        try {
+            byte[] avroBytes = convertAvroFileToByteArray(filePath);
+            System.out.println("Successfully converted Avro file to byte array.");
+            // Here you can do something with the avroBytes, like saving it to a file or printing it.
+            // For demonstration, let's print the size of the byte array:
+            System.out.println("Byte array size: " + avroBytes.length);
+        } catch (IOException e) {
+            System.err.println("Failed to convert Avro file to byte array: " + e.getMessage());
+        }
+    }
+
     public static byte[] convertAvroFileToByteArray(String filePath) throws IOException {
         File avroFile = new File(filePath);
         DatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
@@ -27,57 +40,4 @@ public class AvroFileToByteArrayConverter {
             return outputStream.toByteArray();
         }
     }
-}
-
-
-
-
-
-
-
-
-
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-import org.springframework.batch.item.ExecutionContext;
-
-import java.io.IOException;
-
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-class SposItemReaderTest {
-
-    private SposItemReader sposItemReader;
-    private SposStreamingClient sposStreamingClient;
-    private final String documentId = "test_document";
-    private LogRecordCreator logRecordCreator;
-
-    @BeforeEach
-    void setUp() throws Exception {
-        sposStreamingClient = mock(SposStreamingClient.class);
-        logRecordCreator = mock(LogRecordCreator.class);  // Mocking LogRecordCreator
-        sposItemReader = new SposItemReader(sposStreamingClient, documentId);
-    }
-
-    @Test
-    void testOpen() throws Exception {
-        // Arrange
-        byte[] avroBytes = AvroFileToByteArrayConverter.convertAvroFileToByteArray("path/to/your/avrofile.avro");
-        when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
-                .thenReturn(avroBytes);
-
-        // Act
-        sposItemReader.open(new ExecutionContext());
-
-        // Assert
-        assertNotNull(sposItemReader);
-        verify(sposStreamingClient, Mockito.times(1)).getObjectWithByteRange(anyString(), anyLong(), anyLong());
-    }
-
-    // Other tests...
-
 }

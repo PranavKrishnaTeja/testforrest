@@ -1,7 +1,10 @@
 import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
 import com.schwab.cdt.spos.source.spos.SposStreamingClient;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.file.DataFileStream;
 import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.DatumReader;
 import org.apache.avro.specific.SpecificDatumReader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,7 +13,7 @@ import org.springframework.batch.item.ExecutionContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.Collections;
+import java.nio.ByteBuffer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -70,11 +73,9 @@ class SposItemReaderTest {
         assertNull(sposItemReader.read());
     }
 
-    private byte[] getAvroSerializedData() throws IOException {
-        var schema = "{\"type\": \"record\", \"name\": \"TestRecord\", \"fields\": [{\"name\": \"testField\", \"type\": \"string\"}]}";
-        var datumWriter = new SpecificDatumReader<GenericRecord>();
-        var decoder = DecoderFactory.get().binaryDecoder(new ByteArrayInputStream("{\"testField\": \"testValue\"}".getBytes()), null);
-        var record = datumWriter.read(null, decoder);
-        return record.toString().getBytes();
+    private byte[] getAvroSerializedData() {
+        // Mock Avro serialized data
+        String avroData = "{\"testField\": \"testValue\"}";
+        return avroData.getBytes();
     }
 }

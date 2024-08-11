@@ -5,9 +5,6 @@ import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.SimpleStatement;
-import com.datastax.oss.driver.internal.core.cql.DefaultPreparedStatement;
-import com.datastax.oss.driver.internal.core.cql.MultiPageResultSet;
-import com.datastax.oss.driver.internal.core.session.DefaultSession;
 import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
 import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,21 +37,25 @@ class CassandraItemWriterTest {
     @InjectMocks
     private CassandraItemWriter cassandraItemWriter;
 
+    private PreparedStatement preparedStatement;
     private BoundStatement boundStatement;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
 
-        // Create a SimpleStatement
+        // Create a SimpleStatement with a real query
         SimpleStatement simpleStatement = SimpleStatement.newInstance("INSERT INTO test_table (column1) VALUES (?)");
 
-        // Manually create a PreparedStatement and BoundStatement for testing purposes
-        PreparedStatement preparedStatement = new DefaultPreparedStatement((DefaultSession) session, simpleStatement, null);
-        boundStatement = preparedStatement.bind(new BigDecimal("100.00"));
+        // Create a mock PreparedStatement and a real BoundStatement
+        preparedStatement = mock(PreparedStatement.class);
+        boundStatement = simpleStatement.bind(new BigDecimal("100.00"));
 
-        // Mock session to return this bound statement
+        // Set up the session mock to return the preparedStatement and boundStatement
         when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
+        when(preparedStatement.bind(any())).thenReturn(boundStatement);
+
+        // Mock the executeAsync method to return a completion stage
         when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
     }
 

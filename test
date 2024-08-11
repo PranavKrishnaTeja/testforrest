@@ -16,7 +16,6 @@ import org.mockito.MockitoAnnotations;
 import org.springframework.batch.item.Chunk;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
 
@@ -44,48 +43,33 @@ class CassandraItemWriterTest {
     @InjectMocks
     private CassandraItemWriter cassandraItemWriter;
 
-    // More detailed mocking for Aggregate, Table, Columns, and Metadata
-    @Mock
-    private AggregateFactory.Aggregate aggregate;
-
-    @Mock
-    private AggregateFactory.Table table;
-
-    @Mock
-    private List<AggregateFactory.Columns> columns;
-
-    @Mock
-    private AggregateFactory.Columns column;
-
-    @Mock
-    private AggregateFactory.Metadata metadata;
-
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-
+        
         // Mocking the session and statement behaviors
         when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-        when(session.prepare(anyString())).thenReturn(preparedStatement);
-
+        when(session.prepare(anyString())).thenReturn(preparedStatement);  // Handling the ambiguity
+        
         when(preparedStatement.bind()).thenReturn(boundStatement);
         when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
-
-        // Mocking aggregate and its methods
-        when(aggregate.table()).thenReturn(table);
-        when(table.columns()).thenReturn(columns);
-        when(columns.size()).thenReturn(1); // Assuming at least one column
-        when(columns.get(0)).thenReturn(column);
-        when(column.name()).thenReturn("column");
-        when(column.metadata()).thenReturn(metadata);
-        when(metadata.value()).thenReturn(new BigDecimal("100.00"));
     }
 
     @Test
     void testWrite() {
         // Arrange
-        List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
-        aggregates.add(aggregate);
+        // Create mock columns
+        AggregateFactory.Metadata metadata = new AggregateFactory.Metadata(new BigDecimal("100.00"), "decimal", "column1", null, null);
+        AggregateFactory.Columns column = new AggregateFactory.Columns("column1", metadata);
+
+        // Create a mock table with one column
+        AggregateFactory.Table table = new AggregateFactory.Table("test_table", List.of(column));
+
+        // Create a mock aggregate that uses the table
+        AggregateFactory.Aggregate aggregate = new AggregateFactory.Aggregate("test_aggregate", new AggregateFactory.SourceSchema("schema_name"), table, "INSERT INTO test_table (column1) VALUES (:column1)");
+
+        // Prepare a chunk with the mock aggregate
+        List<AggregateFactory.Aggregate> aggregates = List.of(aggregate);
 
         // Act
         cassandraItemWriter.write(new Chunk<>(aggregates));
@@ -95,6 +79,6 @@ class CassandraItemWriterTest {
         verify(session).executeAsync(boundStatementCaptor.capture());
 
         BoundStatement capturedStatement = boundStatementCaptor.getValue();
-        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
+        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column1"));
     }
 }

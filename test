@@ -1,98 +1,80 @@
-package com.schwab.cdt.spos.source.job;
-
-import com.schwab.cdt.spos.source.logger.LogRecordCreator;
-import com.schwab.pce.common.logging.eli.enums.ServiceCallType;
+import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
+import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.specific.SpecificDatumReader;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.ExitStatus;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.context.ApplicationContext;
+import org.mockito.Mockito;
+import org.springframework.batch.item.ExecutionContext;
 
-import java.time.LocalDateTime;
-import java.util.Date;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.util.Collections;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
-class DataIngestionJobListenerTest {
+class SposItemReaderTest {
 
-    @Mock
-    private LogRecordCreator logRecordCreator;
-
-    @Mock
-    private ApplicationContext applicationContext;
-
-    @Mock
-    private JobExecution jobExecution;
-
-    @InjectMocks
-    private DataIngestionJobListener dataIngestionJobListener;
+    private SposItemReader sposItemReader;
+    private SposStreamingClient sposStreamingClient;
+    private final String documentId = "test_document";
 
     @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
+    void setUp() throws Exception {
+        sposStreamingClient = mock(SposStreamingClient.class);
+        sposItemReader = new SposItemReader(sposStreamingClient, documentId);
     }
 
     @Test
-    void afterJob_logsOutboundMessage_andExitsApplicationOnSuccess() {
+    void testOpen() throws Exception {
         // Arrange
-        LocalDateTime startTime = LocalDateTime.now();
-        LocalDateTime endTime = LocalDateTime.now();
-
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.COMPLETED);
-        when(jobExecution.getStartTime()).thenReturn(java.sql.Timestamp.valueOf(startTime));
-        when(jobExecution.getEndTime()).thenReturn(java.sql.Timestamp.valueOf(endTime));
-        when(jobExecution.getExitStatus()).thenReturn(ExitStatus.COMPLETED);
-
+        when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
+                .thenReturn(getAvroSerializedData());
+        
         // Act
-        dataIngestionJobListener.afterJob(jobExecution);
+        sposItemReader.open(new ExecutionContext());
 
         // Assert
-        verify(logRecordCreator, times(1)).toOutBound(
-            anyString(),
-            eq("ControlM Pcf Task"),
-            eq(startTime),
-            anyMap(),
-            isNull(),
-            eq(ServiceCallType.RPC),
-            isNull(),
-            isNull(),
-            isNull(),
-            isNull()
-        );
-        verify(applicationContext, times(1)).close();
+        assertNotNull(sposItemReader);
+        verify(sposStreamingClient, times(1)).getObjectWithByteRange(anyString(), anyLong(), anyLong());
     }
 
     @Test
-    void afterJob_logsOutboundMessage_andExitsApplicationOnFailure() {
+    void testRead() throws Exception {
         // Arrange
-        LocalDateTime startTime = LocalDateTime.now();
-        LocalDateTime endTime = LocalDateTime.now();
+        when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
+                .thenReturn(getAvroSerializedData());
 
-        when(jobExecution.getStatus()).thenReturn(BatchStatus.FAILED);
-        when(jobExecution.getStartTime()).thenReturn(java.sql.Timestamp.valueOf(startTime));
-        when(jobExecution.getEndTime()).thenReturn(java.sql.Timestamp.valueOf(endTime));
-        when(jobExecution.getExitStatus()).thenReturn(ExitStatus.FAILED);
+        sposItemReader.open(new ExecutionContext());
 
         // Act
-        dataIngestionJobListener.afterJob(jobExecution);
+        GenericRecord result = sposItemReader.read();
 
         // Assert
-        verify(logRecordCreator, times(1)).toOutBound(
-            anyString(),
-            eq("ControlM Pcf Task"),
-            eq(startTime),
-            anyMap(),
-            isNull(),
-            eq(ServiceCallType.RPC),
-            isNull(),
-            isNull(),
-            isNull(),
-            isNull()
-        );
-        verify(applicationContext, times(1)).close();
+        assertNotNull(result);
+        assertEquals("testValue", result.get("testField").toString());
+    }
+
+    @Test
+    void testClose() throws Exception {
+        // Arrange
+        sposItemReader.open(new ExecutionContext());
+
+        // Act
+        sposItemReader.close();
+
+        // Assert
+        assertNull(sposItemReader.read());
+    }
+
+    private byte[] getAvroSerializedData() throws IOException {
+        var schema = "{\"type\": \"record\", \"name\": \"TestRecord\", \"fields\": [{\"name\": \"testField\", \"type\": \"string\"}]}";
+        var datumWriter = new SpecificDatumReader<GenericRecord>();
+        var decoder = DecoderFactory.get().binaryDecoder(new ByteArrayInputStream("{\"testField\": \"testValue\"}".getBytes()), null);
+        var record = datumWriter.read(null, decoder);
+        return record.toString().getBytes();
     }
 }

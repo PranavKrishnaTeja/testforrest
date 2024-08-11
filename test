@@ -32,30 +32,30 @@ class CassandraItemWriterTest {
     private CassandraConfig cassandraConfig;
 
     @Mock
-    private PreparedStatement preparedStatement;
-
-    @Mock
     private CompletionStage<AsyncResultSet> completionStage;
 
     @InjectMocks
     private CassandraItemWriter cassandraItemWriter;
 
-    // Dummy BoundStatement
-    private BoundStatement dummyBoundStatement;
+    private PreparedStatement preparedStatement;
+    private BoundStatement boundStatement;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
 
-        // Initialize a dummy BoundStatement (could use a mock or a real instance depending on your setup)
-        dummyBoundStatement = mock(BoundStatement.class);
+        // Create a real SimpleStatement
+        SimpleStatement simpleStatement = SimpleStatement.newInstance("INSERT INTO test_table (column1) VALUES (?)");
+
+        // Prepare the statement using the session
+        preparedStatement = mock(PreparedStatement.class);
+        when(session.prepare(simpleStatement)).thenReturn(preparedStatement);
+
+        // Create a real BoundStatement from the prepared statement
+        boundStatement = preparedStatement.bind(new BigDecimal("100.00"));
 
         // Mocking the session and statement behaviors
         when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-        when(session.prepare(anyString())).thenReturn(preparedStatement);
-
-        // Returning the dummy BoundStatement when bind() is called
-        when(preparedStatement.bind()).thenReturn(dummyBoundStatement);
         when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
     }
 
@@ -83,9 +83,9 @@ class CassandraItemWriterTest {
         verify(session).executeAsync(boundStatementCaptor.capture());
 
         BoundStatement capturedStatement = boundStatementCaptor.getValue();
-        assertEquals(dummyBoundStatement, capturedStatement);
+        assertEquals(boundStatement, capturedStatement);
 
-        // If you want to assert specific bound values, you could mock the behavior like this:
-        verify(dummyBoundStatement).setBigDecimal("column1", new BigDecimal("100.00"));
+        // If you want to assert specific bound values, you could do so here
+        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal(0));
     }
 }

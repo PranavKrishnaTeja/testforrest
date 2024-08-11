@@ -35,7 +35,6 @@ class SposItemReaderTest {
     void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         sposItemReader = new SposItemReader(sposStreamingClient, "documentId");
-        sposItemReader.setExecutionContext(new ExecutionContext());
     }
 
     @Test
@@ -43,6 +42,9 @@ class SposItemReaderTest {
         // Mock thread and stream service behavior
         Thread mockThread = mock(Thread.class);
         doNothing().when(mockThread).start();
+
+        // Mock DataFileStream behavior
+        dataFileStream = new DataFileStream<>(pipedInputStream, new GenericDatumReader<>());
 
         // Start the reader
         sposItemReader.open(new ExecutionContext());

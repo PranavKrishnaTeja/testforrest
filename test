@@ -45,19 +45,13 @@ class CassandraItemWriterTest {
     @BeforeEach
 void setUp() {
     MockitoAnnotations.openMocks(this);
+    
+    // Mocking the CqlSession and BoundStatement
     when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
     when(preparedStatement.bind()).thenReturn(boundStatement);
     when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
 
-    // Mocking the buildPreparedStatement method if it's in CassandraItemWriter
-    when(cassandraItemWriter.buildPreparedStatement(any(AggregateFactory.Aggregate.class)))
-        .thenReturn(preparedStatement);
-}
-
-@Test
-void testWrite() {
-    // Arrange
-    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
+    // Mocking the Aggregate and its methods
     AggregateFactory.Table table = mock(AggregateFactory.Table.class);
     AggregateFactory.Columns columns = mock(AggregateFactory.Columns.class);
     AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
@@ -68,6 +62,14 @@ void testWrite() {
     when(columns.metadata()).thenReturn(metadata);
     when(metadata.value()).thenReturn(new BigDecimal("100.00"));
 
+    // Mocking the buildPreparedStatement method if it's in CassandraItemWriter
+    when(cassandraItemWriter.buildPreparedStatement(any(AggregateFactory.Aggregate.class)))
+        .thenReturn(preparedStatement);
+}
+
+@Test
+void testWrite() {
+    // Arrange
     List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
     aggregates.add(aggregate);
 

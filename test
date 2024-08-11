@@ -1,86 +1,26 @@
-package com.schwab.cdt.spos.source.job.step.writer;
+@Test
+void testWrite() {
+    // Arrange
+    // Create mock columns
+    AggregateFactory.Metadata metadata = new AggregateFactory.Metadata(new BigDecimal("100.00"), "decimal", "column1", null, null);
+    AggregateFactory.Columns column = new AggregateFactory.Columns("column1", metadata);
 
-import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
-import com.datastax.oss.driver.api.core.cql.BoundStatement;
-import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.core.cql.SimpleStatement;
-import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
-import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.Chunk;
+    // Create a mock table with one column
+    AggregateFactory.Table table = new AggregateFactory.Table("test_table", List.of(column));
 
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.concurrent.CompletionStage;
+    // Create a mock aggregate that uses the table
+    AggregateFactory.Aggregate aggregate = new AggregateFactory.Aggregate("test_aggregate", new AggregateFactory.SourceSchema("schema_name"), table, "INSERT INTO test_table (column1) VALUES (:column1)");
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+    // Prepare a chunk with the mock aggregate
+    List<AggregateFactory.Aggregate> aggregates = List.of(aggregate);
 
-class CassandraItemWriterTest {
+    // Act
+    cassandraItemWriter.write(new Chunk<>(aggregates));
 
-    @Mock
-    private CqlSession session;
+    // Assert
+    ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
+    verify(session).executeAsync(boundStatementCaptor.capture());
 
-    @Mock
-    private CassandraConfig cassandraConfig;
-
-    @Mock
-    private PreparedStatement preparedStatement;
-
-    @Mock
-    private BoundStatement boundStatement;
-
-    @Mock
-    private CompletionStage<AsyncResultSet> completionStage;
-
-    @InjectMocks
-    private CassandraItemWriter cassandraItemWriter;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-
-        // Mock the CqlSession to return a PreparedStatement when preparing a SimpleStatement
-        when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-
-        // Mock the PreparedStatement to return a BoundStatement when binding
-        when(preparedStatement.bind()).thenReturn(boundStatement);
-
-        // Mock the session to return a CompletionStage when executing a BoundStatement
-        when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
-    }
-
-    @Test
-    void testWrite() {
-        // Arrange
-        // Create mock columns
-        AggregateFactory.Metadata metadata = new AggregateFactory.Metadata(new BigDecimal("100.00"), "decimal", "column1", null, null);
-        AggregateFactory.Columns column = new AggregateFactory.Columns("column1", metadata);
-
-        // Create a mock table with one column
-        AggregateFactory.Table table = new AggregateFactory.Table("test_table", List.of(column));
-
-        // Create a mock aggregate that uses the table
-        AggregateFactory.Aggregate aggregate = new AggregateFactory.Aggregate("test_aggregate", new AggregateFactory.SourceSchema("schema_name"), table, "INSERT INTO test_table (column1) VALUES (:column1)");
-
-        // Prepare a chunk with the mock aggregate
-        List<AggregateFactory.Aggregate> aggregates = List.of(aggregate);
-
-        // Act
-        cassandraItemWriter.write(new Chunk<>(aggregates));
-
-        // Assert
-        ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
-        verify(session).executeAsync(boundStatementCaptor.capture());
-
-        BoundStatement capturedStatement = boundStatementCaptor.getValue();
-        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column1"));
-    }
+    BoundStatement capturedStatement = boundStatementCaptor.getValue();
+    assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column1"));
 }

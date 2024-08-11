@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.batch.item.Chunk;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -42,44 +43,50 @@ class CassandraItemWriterTest {
     @InjectMocks
     private CassandraItemWriter cassandraItemWriter;
 
-    @BeforeEach
-void setUp() {
-    MockitoAnnotations.openMocks(this);
+    // Mock Aggregate, Table, Columns, and Metadata
+    @Mock
+    private AggregateFactory.Aggregate aggregate;
     
-    // Mocking the CqlSession and BoundStatement
-    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-    when(preparedStatement.bind()).thenReturn(boundStatement);
-    when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
+    @Mock
+    private AggregateFactory.Table table;
+    
+    @Mock
+    private AggregateFactory.Columns columns;
+    
+    @Mock
+    private AggregateFactory.Metadata metadata;
 
-    // Mocking the Aggregate and its methods
-    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
-    AggregateFactory.Columns columns = mock(AggregateFactory.Columns.class);
-    AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        
+        // Mocking the session and statement behaviors
+        when(session.prepare(any())).thenReturn(preparedStatement);
+        when(preparedStatement.bind()).thenReturn(boundStatement);
+        when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
 
-    when(aggregate.table()).thenReturn(table);
-    when(table.columns()).thenReturn(List.of(columns));
-    when(columns.name()).thenReturn("column");
-    when(columns.metadata()).thenReturn(metadata);
-    when(metadata.value()).thenReturn(new BigDecimal("100.00"));
+        // Mocking aggregate and its methods
+        when(aggregate.table()).thenReturn(table);
+        when(table.columns()).thenReturn(List.of(columns));
+        when(columns.name()).thenReturn("column");
+        when(columns.metadata()).thenReturn(metadata);
+        when(metadata.value()).thenReturn(new BigDecimal("100.00"));
+    }
 
-    // Mocking the buildPreparedStatement method if it's in CassandraItemWriter
-    when(cassandraItemWriter.buildPreparedStatement(any(AggregateFactory.Aggregate.class)))
-        .thenReturn(preparedStatement);
-}
+    @Test
+    void testWrite() {
+        // Arrange
+        List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
+        aggregates.add(aggregate);
 
-@Test
-void testWrite() {
-    // Arrange
-    List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
-    aggregates.add(aggregate);
+        // Act
+        cassandraItemWriter.write(new Chunk<>(aggregates));
 
-    // Act
-    cassandraItemWriter.write(new Chunk<>(aggregates));
+        // Assert
+        ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
+        verify(session).executeAsync(boundStatementCaptor.capture());
 
-    // Assert
-    ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
-    verify(session).executeAsync(boundStatementCaptor.capture());
-
-    BoundStatement capturedStatement = boundStatementCaptor.getValue();
-    assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
+        BoundStatement capturedStatement = boundStatementCaptor.getValue();
+        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
+    }
 }

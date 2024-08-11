@@ -1,23 +1,19 @@
 import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
 import com.schwab.cdt.spos.source.logger.LogRecordCreator;
 import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.batch.item.ExecutionContext;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class SposItemReaderTest {
 
@@ -25,58 +21,85 @@ class SposItemReaderTest {
     private SposStreamingClient sposStreamingClient;
     private final String documentId = "test_document";
     private LogRecordCreator logRecordCreator;
+    private PipedInputStream pipedInputStreamMock;
+    private PipedOutputStream pipedOutputStreamMock;
 
     @BeforeEach
     void setUp() throws Exception {
         sposStreamingClient = mock(SposStreamingClient.class);
-        logRecordCreator = mock(LogRecordCreator.class);  // Mocking LogRecordCreator
+        logRecordCreator = mock(LogRecordCreator.class);
+        pipedInputStreamMock = mock(PipedInputStream.class);
+        pipedOutputStreamMock = mock(PipedOutputStream.class);
+
         sposItemReader = new SposItemReader(sposStreamingClient, documentId);
     }
 
     @Test
     void testOpen() throws Exception {
         // Arrange
-        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
+        byte[] avroBytes = loadSampleAvroBytes();  // A small sample byte array to simulate data
         when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
                 .thenAnswer(invocation -> avroBytes);
 
-        // Use a ByteArrayInputStream to simulate the streaming behavior
-        ByteArrayInputStream inputStream = new ByteArrayInputStream(avroBytes);
+        // Simulate the behavior of the stream
+        doAnswer(invocation -> {
+            byte[] buffer = invocation.getArgument(0);
+            System.arraycopy(avroBytes, 0, buffer, 0, avroBytes.length);
+            return null;
+        }).when(pipedInputStreamMock).read(any(byte[].class));
 
-        // Mock the StreamService to use the ByteArrayInputStream
-        SposItemReader spyReader = Mockito.spy(sposItemReader);
-        Mockito.doReturn(inputStream).when(spyReader).openStream();
+        StreamService streamServiceMock = mock(StreamService.class);
+        when(streamServiceMock.getPipedInputStream()).thenReturn(pipedInputStreamMock);
+
+        sposItemReader = new SposItemReader(sposStreamingClient, documentId) {
+            @Override
+            protected StreamService createStreamService(SposStreamingClient sposStreamingClient, PipedInputStream pipedInputStream, String documentId) {
+                return streamServiceMock;
+            }
+        };
 
         // Act
-        spyReader.open(new ExecutionContext());
+        sposItemReader.open(new ExecutionContext());
 
         // Assert
-        assertNotNull(spyReader);
-        Mockito.verify(sposStreamingClient, Mockito.times(1)).getObjectWithByteRange(anyString(), anyLong(), anyLong());
+        assertNotNull(sposItemReader);
+        verify(sposStreamingClient, times(1)).getObjectWithByteRange(anyString(), anyLong(), anyLong());
     }
 
-    private byte[] loadAvroFileAsBytes(String filePath) throws IOException {
-        // Load the entire Avro file as a byte array
-        return Files.readAllBytes(Paths.get(filePath));
+    private byte[] loadSampleAvroBytes() {
+        // Return a small, sample byte array that simulates Avro data
+        return new byte[]{0x4F, 0x62, 0x6A, /* ... rest of the bytes */};
     }
 
     // Additional Tests (if necessary)...
-    
+
     @Test
     void testRead() throws Exception {
         // Arrange
-        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
+        byte[] avroBytes = loadSampleAvroBytes();
         when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
                 .thenAnswer(invocation -> avroBytes);
 
-        ByteArrayInputStream inputStream = new ByteArrayInputStream(avroBytes);
-        SposItemReader spyReader = Mockito.spy(sposItemReader);
-        Mockito.doReturn(inputStream).when(spyReader).openStream();
+        doAnswer(invocation -> {
+            byte[] buffer = invocation.getArgument(0);
+            System.arraycopy(avroBytes, 0, buffer, 0, avroBytes.length);
+            return null;
+        }).when(pipedInputStreamMock).read(any(byte[].class));
 
-        spyReader.open(new ExecutionContext());
+        StreamService streamServiceMock = mock(StreamService.class);
+        when(streamServiceMock.getPipedInputStream()).thenReturn(pipedInputStreamMock);
+
+        sposItemReader = new SposItemReader(sposStreamingClient, documentId) {
+            @Override
+            protected StreamService createStreamService(SposStreamingClient sposStreamingClient, PipedInputStream pipedInputStream, String documentId) {
+                return streamServiceMock;
+            }
+        };
+
+        sposItemReader.open(new ExecutionContext());
 
         // Act
-        GenericRecord result = spyReader.read();
+        GenericRecord result = sposItemReader.read();
 
         // Assert
         assertNotNull(result);
@@ -86,20 +109,32 @@ class SposItemReaderTest {
     @Test
     void testClose() throws Exception {
         // Arrange
-        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
+        byte[] avroBytes = loadSampleAvroBytes();
         when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
                 .thenAnswer(invocation -> avroBytes);
 
-        ByteArrayInputStream inputStream = new ByteArrayInputStream(avroBytes);
-        SposItemReader spyReader = Mockito.spy(sposItemReader);
-        Mockito.doReturn(inputStream).when(spyReader).openStream();
+        doAnswer(invocation -> {
+            byte[] buffer = invocation.getArgument(0);
+            System.arraycopy(avroBytes, 0, buffer, 0, avroBytes.length);
+            return null;
+        }).when(pipedInputStreamMock).read(any(byte[].class));
 
-        spyReader.open(new ExecutionContext());
+        StreamService streamServiceMock = mock(StreamService.class);
+        when(streamServiceMock.getPipedInputStream()).thenReturn(pipedInputStreamMock);
+
+        sposItemReader = new SposItemReader(sposStreamingClient, documentId) {
+            @Override
+            protected StreamService createStreamService(SposStreamingClient sposStreamingClient, PipedInputStream pipedInputStream, String documentId) {
+                return streamServiceMock;
+            }
+        };
+
+        sposItemReader.open(new ExecutionContext());
 
         // Act
-        spyReader.close();
+        sposItemReader.close();
 
         // Assert
-        assertNull(spyReader.read()); // Ensure nothing can be read after closing
+        assertNull(sposItemReader.read()); // Ensure nothing can be read after closing
     }
 }

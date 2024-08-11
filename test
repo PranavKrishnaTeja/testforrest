@@ -1,39 +1,13 @@
-import org.apache.avro.file.DataFileReader;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericRecord;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-
-public class AvroFileToByteArrayConverter {
-
-    public static void main(String[] args) {
-        String filePath = "path/to/your/avrofile.avro"; // Replace with the path to your Avro file
-        try {
-            byte[] avroBytes = convertAvroFileToByteArray(filePath);
-            System.out.println("Successfully converted Avro file to byte array.");
-            // Here you can do something with the avroBytes, like saving it to a file or printing it.
-            // For demonstration, let's print the size of the byte array:
-            System.out.println("Byte array size: " + avroBytes.length);
-        } catch (IOException e) {
-            System.err.println("Failed to convert Avro file to byte array: " + e.getMessage());
-        }
-    }
-
-    public static byte[] convertAvroFileToByteArray(String filePath) throws IOException {
-        File avroFile = new File(filePath);
-        GenericDatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
-        try (DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(avroFile, datumReader);
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-
-            // Iterate over the file and write each record to the output stream
-            while (dataFileReader.hasNext()) {
-                GenericRecord record = dataFileReader.next();
-                outputStream.write(record.toString().getBytes());
-            }
-
-            return outputStream.toByteArray();
-        }
+public static void main(String[] args) {
+    String filePath = "path/to/your/avrofile.avro"; // Replace with the path to your Avro file
+    try {
+        byte[] avroBytes = convertAvroFileToByteArray(filePath);
+        Files.write(Paths.get("output/avroBytes.dat"), avroBytes);  // Save to a file
+        System.out.println("Byte array saved to file.");
+    } catch (IOException e) {
+        System.err.println("Failed to convert Avro file to byte array: " + e.getMessage());
     }
 }

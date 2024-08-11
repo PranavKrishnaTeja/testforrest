@@ -46,12 +46,14 @@ class CassandraItemWriterTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        
-        // Mocking the session and statement behaviors
+
+        // Mock the CqlSession to return a PreparedStatement when preparing a SimpleStatement
         when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-        when(session.prepare(anyString())).thenReturn(preparedStatement);  // Handling the ambiguity
-        
+
+        // Mock the PreparedStatement to return a BoundStatement when binding
         when(preparedStatement.bind()).thenReturn(boundStatement);
+
+        // Mock the session to return a CompletionStage when executing a BoundStatement
         when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
     }
 

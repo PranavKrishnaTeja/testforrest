@@ -8,15 +8,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import schwab.discovery.client.EndpointNotFoundException;
-import schwab.discovery.client.ServiceRegistryException;
+import org.springframework.batch.item.ExecutionContext;
 
 import java.io.IOException;
 import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.*;
 
 class SposItemReaderTest {
@@ -28,42 +26,44 @@ class SposItemReaderTest {
     private PipedInputStream pipedInputStream;
 
     @Mock
-    private PipedOutputStream pipedOutputStream;
+    private DataFileStream<GenericRecord> dataFileStream;
 
     @InjectMocks
     private SposItemReader sposItemReader;
 
     @BeforeEach
-    void setUp() throws EndpointNotFoundException, ServiceRegistryException, IOException {
+    void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         sposItemReader = new SposItemReader(sposStreamingClient, "documentId");
-        pipedInputStream = mock(PipedInputStream.class);
-        pipedOutputStream = mock(PipedOutputStream.class);
+        sposItemReader.setExecutionContext(new ExecutionContext());
     }
 
     @Test
     void testDoOpen() throws Exception {
+        // Mock thread and stream service behavior
         Thread mockThread = mock(Thread.class);
-        whenNew(Thread.class).withAnyArguments().thenReturn(mockThread);
         doNothing().when(mockThread).start();
 
+        // Start the reader
         sposItemReader.open(new ExecutionContext());
 
+        // Assert that the dataFileStream is not null after opening
         assertNotNull(sposItemReader);
     }
 
     @Test
-    void testDoRead() {
-        DataFileStream<GenericRecord> dataFileStream = mock(DataFileStream.class);
+    void testDoRead() throws Exception {
+        // Mock the DataFileStream to return a record
+        sposItemReader.open(new ExecutionContext());
         when(dataFileStream.iterator()).thenReturn(mock(Iterator.class));
-        sposItemReader.setDataFileStream(dataFileStream);
-
         when(dataFileStream.iterator().hasNext()).thenReturn(true);
         when(dataFileStream.iterator().next()).thenReturn(mock(GenericRecord.class));
 
+        // Invoke the reader's doRead method and assert the result
         GenericRecord result = sposItemReader.read();
         assertNotNull(result);
 
+        // Test when there's no more data to read
         when(dataFileStream.iterator().hasNext()).thenReturn(false);
         result = sposItemReader.read();
         assertNull(result);
@@ -71,12 +71,14 @@ class SposItemReaderTest {
 
     @Test
     void testDoClose() throws Exception {
-        DataFileStream<GenericRecord> dataFileStream = mock(DataFileStream.class);
-        sposItemReader.setDataFileStream(dataFileStream);
-
+        // Mock closing behavior
+        sposItemReader.open(new ExecutionContext());
         doNothing().when(dataFileStream).close();
 
+        // Invoke close method
         sposItemReader.close();
+
+        // Verify the stream was closed
         verify(dataFileStream, times(1)).close();
     }
 }

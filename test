@@ -1,86 +1,80 @@
-import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.file.DataFileStream;
-import org.apache.avro.generic.GenericDatumReader;
-import org.apache.avro.generic.GenericRecord;
+package com.schwab.cdt.spos.source.job.step.writer;
+
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
+import com.datastax.oss.driver.api.core.cql.BoundStatement;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
+import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.ExecutionContext;
 
-import java.io.IOException;
-import java.io.PipedInputStream;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletionStage;
 
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class SposItemReaderTest {
+class CassandraItemWriterTest {
 
     @Mock
-    private SposStreamingClient sposStreamingClient;
+    private CqlSession session;
 
     @Mock
-    private PipedInputStream pipedInputStream;
+    private CassandraConfig cassandraConfig;
 
     @Mock
-    private DataFileStream<GenericRecord> dataFileStream;
+    private PreparedStatement preparedStatement;
+
+    @Mock
+    private BoundStatement boundStatement;
+
+    @Mock
+    private CompletionStage<AsyncResultSet> completionStage;
 
     @InjectMocks
-    private SposItemReader sposItemReader;
+    private CassandraItemWriter cassandraItemWriter;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         MockitoAnnotations.openMocks(this);
-        sposItemReader = new SposItemReader(sposStreamingClient, "documentId");
+        when(session.prepare(any(String.class))).thenReturn(preparedStatement);
+        when(preparedStatement.bind()).thenReturn(boundStatement);
+        when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
     }
 
     @Test
-    void testDoOpen() throws Exception {
-        // Mock thread and stream service behavior
-        Thread mockThread = mock(Thread.class);
-        doNothing().when(mockThread).start();
+    void testWrite() {
+        // Arrange
+        AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
+        AggregateFactory.Table table = mock(AggregateFactory.Table.class);
+        AggregateFactory.Columns columns = mock(AggregateFactory.Columns.class);
+        AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
 
-        // Mock DataFileStream behavior
-        dataFileStream = new DataFileStream<>(pipedInputStream, new GenericDatumReader<>());
+        when(aggregate.table()).thenReturn(table);
+        when(table.columns()).thenReturn(List.of(columns));
+        when(columns.name()).thenReturn("column");
+        when(columns.metadata()).thenReturn(metadata);
+        when(metadata.value()).thenReturn(new BigDecimal("100.00"));
 
-        // Start the reader
-        sposItemReader.open(new ExecutionContext());
+        List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
+        aggregates.add(aggregate);
 
-        // Assert that the dataFileStream is not null after opening
-        assertNotNull(sposItemReader);
-    }
+        // Act
+        cassandraItemWriter.write(new Chunk<>(aggregates));
 
-    @Test
-    void testDoRead() throws Exception {
-        // Mock the DataFileStream to return a record
-        sposItemReader.open(new ExecutionContext());
-        when(dataFileStream.iterator()).thenReturn(mock(Iterator.class));
-        when(dataFileStream.iterator().hasNext()).thenReturn(true);
-        when(dataFileStream.iterator().next()).thenReturn(mock(GenericRecord.class));
+        // Assert
+        ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
+        verify(session).executeAsync(boundStatementCaptor.capture());
 
-        // Invoke the reader's doRead method and assert the result
-        GenericRecord result = sposItemReader.read();
-        assertNotNull(result);
-
-        // Test when there's no more data to read
-        when(dataFileStream.iterator().hasNext()).thenReturn(false);
-        result = sposItemReader.read();
-        assertNull(result);
-    }
-
-    @Test
-    void testDoClose() throws Exception {
-        // Mock closing behavior
-        sposItemReader.open(new ExecutionContext());
-        doNothing().when(dataFileStream).close();
-
-        // Invoke close method
-        sposItemReader.close();
-
-        // Verify the stream was closed
-        verify(dataFileStream, times(1)).close();
+        BoundStatement capturedStatement = boundStatementCaptor.getValue();
+        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
     }
 }

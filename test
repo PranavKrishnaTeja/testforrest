@@ -1,12 +1,15 @@
 import com.schwab.cdt.spos.source.job.step.reader.SposItemReader;
 import com.schwab.cdt.spos.source.logger.LogRecordCreator;
 import com.schwab.cdt.spos.source.spos.SposStreamingClient;
+import org.apache.avro.file.DataFileReader;
+import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.batch.item.ExecutionContext;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -33,7 +36,7 @@ class SposItemReaderTest {
     @Test
     void testOpen() throws Exception {
         // Arrange
-        byte[] avroBytes = getAvroBytesFromFile("path/to/your/avroBytes.dat");
+        byte[] avroBytes = loadAvroFileAsBytes("path/to/your/avrofile.avro"); // Load actual Avro file
         when(sposStreamingClient.getObjectWithByteRange(anyString(), anyLong(), anyLong()))
                 .thenReturn(avroBytes);
 
@@ -45,8 +48,8 @@ class SposItemReaderTest {
         Mockito.verify(sposStreamingClient, Mockito.times(1)).getObjectWithByteRange(anyString(), anyLong(), anyLong());
     }
 
-    private byte[] getAvroBytesFromFile(String filePath) throws IOException {
-        // Read the byte array from the .dat file
+    private byte[] loadAvroFileAsBytes(String filePath) throws IOException {
+        // Load the entire Avro file as a byte array
         return Files.readAllBytes(Paths.get(filePath));
     }
 

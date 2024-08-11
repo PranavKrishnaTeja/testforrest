@@ -1,8 +1,6 @@
 import org.apache.avro.file.DataFileReader;
-import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.io.DatumReader;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -25,16 +23,14 @@ public class AvroFileToByteArrayConverter {
 
     public static byte[] convertAvroFileToByteArray(String filePath) throws IOException {
         File avroFile = new File(filePath);
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
+        GenericDatumReader<GenericRecord> datumReader = new GenericDatumReader<>();
         try (DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(avroFile, datumReader);
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
 
-            DataFileStream<GenericRecord> dataFileStream = new DataFileStream<>(dataFileReader, datumReader);
-
             // Iterate over the file and write each record to the output stream
-            while (dataFileStream.hasNext()) {
-                GenericRecord record = dataFileStream.next();
-                dataFileStream.appendTo(outputStream); // Append each record to the output stream
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                outputStream.write(record.toString().getBytes());
             }
 
             return outputStream.toByteArray();

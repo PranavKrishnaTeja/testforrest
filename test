@@ -4,6 +4,7 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
 import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,37 +58,42 @@ class CassandraItemWriterTest {
     private AggregateFactory.Metadata metadata;
 
     @BeforeEach
-void setUp() {
-    MockitoAnnotations.openMocks(this);
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        
+        // Mocking the session and statement behaviors
+        when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
+        when(session.prepare(anyString())).thenReturn(preparedStatement);  // Handling the ambiguity
+        
+        when(preparedStatement.bind()).thenReturn(boundStatement);
+        when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
 
-    // Mocking the session and statement behaviors
-    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-    when(session.prepare(anyString())).thenReturn(preparedStatement);  // Handling the ambiguity
-    
-    when(preparedStatement.bind()).thenReturn(boundStatement);
-    when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
+        // Mocking aggregate and its methods
+        when(aggregate.table()).thenReturn(table);
+        when(table.columns()).thenReturn(List.of(columns));
+        when(columns.name()).thenReturn("column");
+        when(columns.metadata()).thenReturn(metadata);
+        when(metadata.value()).thenReturn(new BigDecimal("100.00"));
+    }
 
-    // Mocking aggregate and its methods
-    when(aggregate.table()).thenReturn(table);
-    when(table.columns()).thenReturn(List.of(columns));
-    when(columns.name()).thenReturn("column");
-    when(columns.metadata()).thenReturn(metadata);
-    when(metadata.value()).thenReturn(new BigDecimal("100.00"));
-}
+    @Test
+    void testWrite() {
+        // Arrange
+        List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
+        aggregates.add(aggregate);
 
-@Test
-void testWrite() {
-    // Arrange
-    List<AggregateFactory.Aggregate> aggregates = new ArrayList<>();
-    aggregates.add(aggregate);
+        // Log to see what happens before execution
+        System.out.println("Executing write operation");
 
-    // Act
-    cassandraItemWriter.write(new Chunk<>(aggregates));
+        // Act
+        cassandraItemWriter.write(new Chunk<>(aggregates));
 
-    // Assert
-    ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
-    verify(session).executeAsync(boundStatementCaptor.capture());
+        // Assert
+        ArgumentCaptor<BoundStatement> boundStatementCaptor = ArgumentCaptor.forClass(BoundStatement.class);
+        verify(session).executeAsync(boundStatementCaptor.capture());
 
-    BoundStatement capturedStatement = boundStatementCaptor.getValue();
-    assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
+        BoundStatement capturedStatement = boundStatementCaptor.getValue();
+        System.out.println("Captured Statement: " + capturedStatement);
+        assertEquals(new BigDecimal("100.00"), capturedStatement.getBigDecimal("column"));
+    }
 }

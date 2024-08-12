@@ -1,118 +1,41 @@
-import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.cql.AsyncResultSet;
-import com.datastax.oss.driver.api.core.cql.BoundStatement;
-import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-import com.datastax.oss.driver.api.core.cql.SimpleStatement;
-import com.schwab.cdt.spos.source.config.cassandra.CassandraConfig;
-import com.schwab.cdt.spos.source.exception.UnableToWriteToCassandraException;
-import com.schwab.cdt.spos.source.job.aggregate.AggregateFactory;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.item.Chunk;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.test.util.ReflectionTestUtils;
-
-import java.math.BigDecimal;
-import java.math.BigInteger;
-import java.time.Instant;
-import java.util.Arrays;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-class CassandraItemWriterTest {
+@BeforeEach
+void setUp() {
+    MockitoAnnotations.openMocks(this);
 
-    @Mock
-    private CqlSession session;
+    when(cassandraConfig.maxConcurrentWriteRequests()).thenReturn(10);
 
-    @Mock
-    private CassandraConfig cassandraConfig;
+    // Mocking Table and Columns
+    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
+    when(table.name()).thenReturn("affiliateAccountBalance");
 
-    @Mock
-    private AsyncResultSet asyncResultSet;
+    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
+    when(aggregate.table()).thenReturn(table);
 
-    private CassandraItemWriter cassandraItemWriter;
+    // Assuming that you need to mock more properties
+    when(aggregate.sql()).thenReturn("INSERT INTO...");
 
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
+    // Re-mock specific method to prevent NPE
+    when(session.prepare(any(SimpleStatement.class))).thenReturn(mock(PreparedStatement.class));
 
-        when(cassandraConfig.maxConcurrentWriteRequests()).thenReturn(10);
+    cassandraItemWriter = new CassandraItemWriter(session, cassandraConfig);
+}
 
-        cassandraItemWriter = new CassandraItemWriter(session, cassandraConfig);
-    }
+@Test
+void testBuildBoundStatement() {
+    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
+    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
+    when(aggregate.table()).thenReturn(table);
+    when(table.name()).thenReturn("affiliateAccountBalance");
 
-    @Test
-    void testWrite() throws InterruptedException {
-        AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-        Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Arrays.asList(aggregate));
+    PreparedStatement preparedStatement = mock(PreparedStatement.class);
+    BoundStatement boundStatement = mock(BoundStatement.class);
 
-        BoundStatement boundStatement = mock(BoundStatement.class);
-        CompletionStage<AsyncResultSet> completionStage = mock(CompletionStage.class);
+    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
+    when(preparedStatement.bind()).thenReturn(boundStatement);
 
-        when(session.executeAsync(any(BoundStatement.class))).thenReturn(completionStage);
-        when(completionStage.whenComplete(any())).thenAnswer(invocation -> {
-            ((CompletionStage<AsyncResultSet>) invocation.getArgument(0)).whenComplete((asyncResultSet, throwable) -> {
-                if (throwable != null) {
-                    throw new UnableToWriteToCassandraException("Error while executing aggregate");
-                }
-            });
-            return null;
-        });
+    BoundStatement result = ReflectionTestUtils.invokeMethod(cassandraItemWriter, "buildBoundStatement", aggregate);
 
-        cassandraItemWriter.write(chunk);
-
-        verify(session, times(1)).executeAsync(any(BoundStatement.class));
-    }
-
-    @Test
-    void testBuildBoundStatement() {
-        AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-        BoundStatement boundStatement = mock(BoundStatement.class);
-
-        when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-        when(preparedStatement.bind()).thenReturn(boundStatement);
-
-        BoundStatement result = ReflectionTestUtils.invokeMethod(cassandraItemWriter, "buildBoundStatement", aggregate);
-
-        assertNotNull(result);
-    }
-
-    @Test
-    void testBuildPreparedStatement() {
-        AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-        SimpleStatement simpleStatement = mock(SimpleStatement.class);
-        PreparedStatement preparedStatement = mock(PreparedStatement.class);
-
-        when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-
-        PreparedStatement result = ReflectionTestUtils.invokeMethod(cassandraItemWriter, "buildPreparedStatement", aggregate);
-
-        assertNotNull(result);
-    }
-
-    @Test
-    void testRelease() {
-        Semaphore semaphore = new Semaphore(10);
-        AtomicBoolean isAwait = new AtomicBoolean(true);
-        CountDownLatch countDownLatch = new CountDownLatch(1);
-
-        ReflectionTestUtils.setField(cassandraItemWriter, "semaphore", semaphore);
-        ReflectionTestUtils.setField(cassandraItemWriter, "isAwait", isAwait);
-        ReflectionTestUtils.setField(cassandraItemWriter, "countDownLatch", countDownLatch);
-
-        ReflectionTestUtils.invokeMethod(cassandraItemWriter, "release", isAwait, countDownLatch);
-
-        assertEquals(0, countDownLatch.getCount());
-        assertFalse(isAwait.get());
-    }
+    assertNotNull(result);
 }

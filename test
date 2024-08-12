@@ -1,5 +1,3 @@
-import static org.mockito.Mockito.*;
-
 @Test
 void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws InterruptedException {
     // Mock the metadata and columns as before
@@ -26,9 +24,16 @@ void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws Interrup
     when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
     when(preparedStatement.bind()).thenReturn(boundStatement);
 
-    // Stubbing to simulate setting values in BoundStatement
-    when(boundStatement.setString(anyString(), anyString())).thenReturn(boundStatement);
-    when(boundStatement.set(anyString(), any(Instant.class), eq(Instant.class))).thenReturn(boundStatement);
+    // Mock the CompletionStage and AsyncResultSet
+    CompletionStage<AsyncResultSet> completionStage = mock(CompletionStage.class);
+    when(session.executeAsync(boundStatement)).thenReturn(completionStage);
+
+    // Mock the behavior of whenComplete
+    when(completionStage.whenComplete(any())).thenAnswer(invocation -> {
+        // Trigger the whenComplete callback with null for throwable and a mock AsyncResultSet
+        ((BiConsumer<AsyncResultSet, Throwable>) invocation.getArgument(0)).accept(mock(AsyncResultSet.class), null);
+        return completionStage;
+    });
 
     // Create a chunk of items
     Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Arrays.asList(aggregate));
@@ -42,4 +47,5 @@ void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws Interrup
 
     // Ensure the statement is executed
     verify(session).executeAsync(boundStatement);
+    verify(completionStage).whenComplete(any());  // Verify whenComplete was called
 }

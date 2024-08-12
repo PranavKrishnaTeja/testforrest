@@ -1,18 +1,24 @@
 @Test
 void testWrite_CallsBuildBoundStatementAndExecutesSuccessfully() throws InterruptedException {
-    // Mocking the aggregate and its dependencies
-    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
-    AggregateFactory.Columns column = mock(AggregateFactory.Columns.class);
+    // Create the Metadata mock
     AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
+    when(metadata.value()).thenReturn("12345");  // Example value for the column
+    when(metadata.sourceType()).thenReturn("string");  // Example type
 
-    // Set up the table and column mocks
-    when(aggregate.table()).thenReturn(table);
-    when(table.name()).thenReturn("affiliateAccountBalance");
-    when(table.columns()).thenReturn(Arrays.asList(column)); // Assuming you have columns
-    when(column.name()).thenReturn("affiliateAccountId");
+    // Create the Columns mock
+    AggregateFactory.Columns column = mock(AggregateFactory.Columns.class);
+    when(column.name()).thenReturn("affiliateAccountId");  // Example column name
     when(column.metadata()).thenReturn(metadata);
-    when(metadata.value()).thenReturn("someValue");
+
+    // Create the Table mock
+    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
+    when(table.name()).thenReturn("affiliateAccountBalance");  // Example table name
+    when(table.columns()).thenReturn(Arrays.asList(column));  // Add the column to the table
+
+    // Create the Aggregate mock
+    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
+    when(aggregate.table()).thenReturn(table);
+    when(aggregate.sql()).thenReturn("INSERT INTO affiliateAccountBalance (affiliateAccountId) VALUES (:affiliateAccountId)");  // Example SQL
 
     // Mock the BoundStatement and other dependencies
     PreparedStatement preparedStatement = mock(PreparedStatement.class);
@@ -32,46 +38,5 @@ void testWrite_CallsBuildBoundStatementAndExecutesSuccessfully() throws Interrup
 
     // Additional assertions to verify the BoundStatement's state
     assertNotNull(boundStatement);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@Test
-void testBuildBoundStatement() {
-    // Mocking the aggregate and its dependencies
-    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
-    AggregateFactory.Columns column = mock(AggregateFactory.Columns.class);
-    
-    // Setting up the table and column mocks
-    when(aggregate.table()).thenReturn(table);
-    when(table.name()).thenReturn("affiliateAccountBalance");
-    when(table.columns()).thenReturn(Arrays.asList(column));  // Assuming you have columns
-
-    PreparedStatement preparedStatement = mock(PreparedStatement.class);
-    BoundStatement boundStatement = mock(BoundStatement.class);
-
-    // Setting up the session mock
-    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-    when(preparedStatement.bind()).thenReturn(boundStatement);
-
-    // Now invoking the method under test
-    BoundStatement result = ReflectionTestUtils.invokeMethod(cassandraItemWriter, "buildBoundStatement", aggregate);
-
-    // Assert that the result is not null
-    assertNotNull(result, "The buildBoundStatement method returned null when it was expected to return a non-null BoundStatement.");
+    verify(boundStatement, times(1)).setString("affiliateAccountId", "12345");  // Verify if the correct value is set in the BoundStatement
 }

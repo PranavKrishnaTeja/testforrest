@@ -24,6 +24,10 @@ void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws Interrup
     when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
     when(preparedStatement.bind()).thenReturn(boundStatement);
 
+    // Ensure that boundStatement is not null
+    when(boundStatement.setString(anyString(), anyString())).thenReturn(boundStatement);
+    when(boundStatement.set(anyString(), any(Instant.class), eq(Instant.class))).thenReturn(boundStatement);
+
     // Mock the CompletionStage and AsyncResultSet
     CompletionStage<AsyncResultSet> completionStage = mock(CompletionStage.class);
     when(session.executeAsync(boundStatement)).thenReturn(completionStage);

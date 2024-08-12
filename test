@@ -1,31 +1,34 @@
-@Test
-void testWrite_CallsBuildBoundStatementAndExecutesSuccessfully() throws InterruptedException {
-    // Create the Metadata mock
-    AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
-    when(metadata.value()).thenReturn("12345");  // Example value for the column
-    when(metadata.sourceType()).thenReturn("string");  // Example type
+import static org.mockito.Mockito.*;
 
-    // Create the Columns mock
+@Test
+void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws InterruptedException {
+    // Mock the metadata and columns as before
+    AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
+    when(metadata.value()).thenReturn("12345");
+    when(metadata.sourceType()).thenReturn("string");
+
     AggregateFactory.Columns column = mock(AggregateFactory.Columns.class);
-    when(column.name()).thenReturn("affiliateAccountId");  // Example column name
+    when(column.name()).thenReturn("affiliateAccountId");
     when(column.metadata()).thenReturn(metadata);
 
-    // Create the Table mock
     AggregateFactory.Table table = mock(AggregateFactory.Table.class);
-    when(table.name()).thenReturn("affiliateAccountBalance");  // Example table name
-    when(table.columns()).thenReturn(Arrays.asList(column));  // Add the column to the table
+    when(table.name()).thenReturn("affiliateAccountBalance");
+    when(table.columns()).thenReturn(Arrays.asList(column));
 
-    // Create the Aggregate mock
     AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
     when(aggregate.table()).thenReturn(table);
-    when(aggregate.sql()).thenReturn("INSERT INTO affiliateAccountBalance (affiliateAccountId) VALUES (:affiliateAccountId)");  // Example SQL
+    when(aggregate.sql()).thenReturn("INSERT INTO affiliateAccountBalance (affiliateAccountId) VALUES (:affiliateAccountId)");
 
-    // Mock the BoundStatement and other dependencies
+    // Mock BoundStatement and other dependencies
     PreparedStatement preparedStatement = mock(PreparedStatement.class);
     BoundStatement boundStatement = mock(BoundStatement.class);
 
     when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
     when(preparedStatement.bind()).thenReturn(boundStatement);
+
+    // Stubbing to simulate setting values in BoundStatement
+    when(boundStatement.setString(anyString(), anyString())).thenReturn(boundStatement);
+    when(boundStatement.set(anyString(), any(Instant.class), eq(Instant.class))).thenReturn(boundStatement);
 
     // Create a chunk of items
     Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Arrays.asList(aggregate));
@@ -33,10 +36,10 @@ void testWrite_CallsBuildBoundStatementAndExecutesSuccessfully() throws Interrup
     // Invoke the write method
     cassandraItemWriter.write(chunk);
 
-    // Verify that the session.executeAsync() method was called with the expected BoundStatement
-    verify(session, times(1)).executeAsync(boundStatement);
+    // Verify that BoundStatement has been correctly populated
+    verify(boundStatement).setString("affiliateAccountId", "12345");
+    verify(boundStatement).set(CassandraItemWriter.LAST_UPDATED_TIMESTAMP, Instant.now(), Instant.class);
 
-    // Additional assertions to verify the BoundStatement's state
-    assertNotNull(boundStatement);
-    verify(boundStatement, times(1)).setString("affiliateAccountId", "12345");  // Verify if the correct value is set in the BoundStatement
+    // Ensure the statement is executed
+    verify(session).executeAsync(boundStatement);
 }

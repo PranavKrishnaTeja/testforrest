@@ -1,5 +1,10 @@
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 @Test
 void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws InterruptedException {
+    // Capture a fixed Instant for comparison
+    Instant beforeExecutionInstant = Instant.now();
+
     // Mock the metadata and columns as before
     AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
     when(metadata.value()).thenReturn("12345");
@@ -24,9 +29,10 @@ void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws Interrup
     when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
     when(preparedStatement.bind()).thenReturn(boundStatement);
 
-    // Ensure that boundStatement is not null
+    // Ensure that boundStatement is not null and returns itself when methods are called
     when(boundStatement.setString(anyString(), anyString())).thenReturn(boundStatement);
-    when(boundStatement.set(anyString(), any(Instant.class), eq(Instant.class))).thenReturn(boundStatement);
+    when(boundStatement.set(eq(CassandraItemWriter.LAST_UPDATED_TIMESTAMP), any(Instant.class), eq(Instant.class)))
+        .thenReturn(boundStatement);
 
     // Mock the CompletionStage and AsyncResultSet
     CompletionStage<AsyncResultSet> completionStage = mock(CompletionStage.class);
@@ -45,9 +51,20 @@ void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws Interrup
     // Invoke the write method
     cassandraItemWriter.write(chunk);
 
+    // Capture the instant after execution
+    Instant afterExecutionInstant = Instant.now();
+
     // Verify that BoundStatement has been correctly populated
     verify(boundStatement).setString("affiliateAccountId", "12345");
-    verify(boundStatement).set(CassandraItemWriter.LAST_UPDATED_TIMESTAMP, Instant.now(), Instant.class);
+
+    // Extract the Instant that was actually set
+    ArgumentCaptor<Instant> instantCaptor = ArgumentCaptor.forClass(Instant.class);
+    verify(boundStatement).set(eq(CassandraItemWriter.LAST_UPDATED_TIMESTAMP), instantCaptor.capture(), eq(Instant.class));
+
+    // Assert that the captured Instant is within the expected range
+    Instant capturedInstant = instantCaptor.getValue();
+    assertTrue(!capturedInstant.isBefore(beforeExecutionInstant) && !capturedInstant.isAfter(afterExecutionInstant),
+               "The captured Instant should be within the range of beforeExecutionInstant and afterExecutionInstant.");
 
     // Ensure the statement is executed
     verify(session).executeAsync(boundStatement);

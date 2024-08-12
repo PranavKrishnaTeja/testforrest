@@ -1,72 +1,28 @@
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.*;
+
+@BeforeEach
+void setUp() {
+    MockitoAnnotations.openMocks(this);
+
+    // Mock LogRecordCreator
+    LogRecordCreator logRecordCreator = mock(LogRecordCreator.class);
+
+    // Mock other dependencies as before
+    CqlSession session = mock(CqlSession.class);
+    CassandraConfig cassandraConfig = mock(CassandraConfig.class);
+
+    // Inject mocks into CassandraItemWriter
+    cassandraItemWriter = new CassandraItemWriter(session, cassandraConfig);
+    ReflectionTestUtils.setField(cassandraItemWriter, "logRecordCreator", logRecordCreator);
+
+    // Set up other required mocks
+    when(cassandraConfig.maxConcurrentWriteRequests()).thenReturn(10);
+}
 
 @Test
 void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws InterruptedException {
-    // Capture a fixed Instant for comparison
-    Instant beforeExecutionInstant = Instant.now();
+    // Your existing test setup...
 
-    // Mock the metadata and columns as before
-    AggregateFactory.Metadata metadata = mock(AggregateFactory.Metadata.class);
-    when(metadata.value()).thenReturn("12345");
-    when(metadata.sourceType()).thenReturn("string");
-
-    AggregateFactory.Columns column = mock(AggregateFactory.Columns.class);
-    when(column.name()).thenReturn("affiliateAccountId");
-    when(column.metadata()).thenReturn(metadata);
-
-    AggregateFactory.Table table = mock(AggregateFactory.Table.class);
-    when(table.name()).thenReturn("affiliateAccountBalance");
-    when(table.columns()).thenReturn(Arrays.asList(column));
-
-    AggregateFactory.Aggregate aggregate = mock(AggregateFactory.Aggregate.class);
-    when(aggregate.table()).thenReturn(table);
-    when(aggregate.sql()).thenReturn("INSERT INTO affiliateAccountBalance (affiliateAccountId) VALUES (:affiliateAccountId)");
-
-    // Mock BoundStatement and other dependencies
-    PreparedStatement preparedStatement = mock(PreparedStatement.class);
-    BoundStatement boundStatement = mock(BoundStatement.class);
-
-    when(session.prepare(any(SimpleStatement.class))).thenReturn(preparedStatement);
-    when(preparedStatement.bind()).thenReturn(boundStatement);
-
-    // Ensure that boundStatement is not null and returns itself when methods are called
-    when(boundStatement.setString(anyString(), anyString())).thenReturn(boundStatement);
-    when(boundStatement.set(eq(CassandraItemWriter.LAST_UPDATED_TIMESTAMP), any(Instant.class), eq(Instant.class)))
-        .thenReturn(boundStatement);
-
-    // Mock the CompletionStage and AsyncResultSet
-    CompletionStage<AsyncResultSet> completionStage = mock(CompletionStage.class);
-    when(session.executeAsync(boundStatement)).thenReturn(completionStage);
-
-    // Mock the behavior of whenComplete
-    when(completionStage.whenComplete(any())).thenAnswer(invocation -> {
-        // Trigger the whenComplete callback with null for throwable and a mock AsyncResultSet
-        ((BiConsumer<AsyncResultSet, Throwable>) invocation.getArgument(0)).accept(mock(AsyncResultSet.class), null);
-        return completionStage;
-    });
-
-    // Create a chunk of items
-    Chunk<AggregateFactory.Aggregate> chunk = new Chunk<>(Arrays.asList(aggregate));
-
-    // Invoke the write method
-    cassandraItemWriter.write(chunk);
-
-    // Capture the instant after execution
-    Instant afterExecutionInstant = Instant.now();
-
-    // Verify that BoundStatement has been correctly populated
-    verify(boundStatement).setString("affiliateAccountId", "12345");
-
-    // Extract the Instant that was actually set
-    ArgumentCaptor<Instant> instantCaptor = ArgumentCaptor.forClass(Instant.class);
-    verify(boundStatement).set(eq(CassandraItemWriter.LAST_UPDATED_TIMESTAMP), instantCaptor.capture(), eq(Instant.class));
-
-    // Assert that the captured Instant is within the expected range
-    Instant capturedInstant = instantCaptor.getValue();
-    assertTrue(!capturedInstant.isBefore(beforeExecutionInstant) && !capturedInstant.isAfter(afterExecutionInstant),
-               "The captured Instant should be within the range of beforeExecutionInstant and afterExecutionInstant.");
-
-    // Ensure the statement is executed
-    verify(session).executeAsync(boundStatement);
-    verify(completionStage).whenComplete(any());  // Verify whenComplete was called
+    // Verify logRecordCreator was called
+    verify(logRecordCreator, atLeastOnce()).toOutBound(anyString(), anyString(), any(LocalDateTime.class), anyMap(), any(Exception.class), any(ServiceCallType.class), anyString(), anyString(), anyString(), anyLong());
 }

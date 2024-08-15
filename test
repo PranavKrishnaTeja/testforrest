@@ -3,14 +3,29 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
+import java.io.File;
 
 public class ReadFixture {
 
     public static String readFixture(String path) throws IOException {
         // Print the current working directory
-        System.out.println("Current working directory: " + System.getProperty("user.dir"));
+        String currentDir = System.getProperty("user.dir");
+        System.out.println("Current working directory: " + currentDir);
         
-        // Print the relative path being passed
+        // List and print all files in the directory two levels up
+        File upperDirectory = new File(currentDir + "/../../");
+        File[] filesList = upperDirectory.listFiles();
+        
+        System.out.println("Contents of the directory two levels up (../../):");
+        if (filesList != null) {
+            for (File file : filesList) {
+                System.out.println(file.getAbsolutePath());
+            }
+        } else {
+            System.out.println("The directory is empty or does not exist.");
+        }
+        
+        // Print the relative path provided
         System.out.println("Relative path provided: " + path);
         
         // Construct the full path where the file should be located

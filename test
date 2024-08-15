@@ -1,28 +1,55 @@
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import javax.persistence.EntityManager;
+import javax.persistence.Query;
 
-@BeforeEach
-void setUp() {
-    MockitoAnnotations.openMocks(this);
+class H2DBConnectorTest {
 
-    // Mock LogRecordCreator
-    LogRecordCreator logRecordCreator = mock(LogRecordCreator.class);
+    @Mock
+    private EntityManager entityManager;
 
-    // Mock other dependencies as before
-    CqlSession session = mock(CqlSession.class);
-    CassandraConfig cassandraConfig = mock(CassandraConfig.class);
+    @Mock
+    private TestSqlQueries testSqlQueries;
 
-    // Inject mocks into CassandraItemWriter
-    cassandraItemWriter = new CassandraItemWriter(session, cassandraConfig);
-    ReflectionTestUtils.setField(cassandraItemWriter, "logRecordCreator", logRecordCreator);
+    @Mock
+    private Query query;
 
-    // Set up other required mocks
-    when(cassandraConfig.maxConcurrentWriteRequests()).thenReturn(10);
-}
+    @InjectMocks
+    private H2DBConnector h2DBConnector;
 
-@Test
-void testWrite_SetsLastUpdatedTimestampAndExecutesSuccessfully() throws InterruptedException {
-    // Your existing test setup...
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
 
-    // Verify logRecordCreator was called
-    verify(logRecordCreator, atLeastOnce()).toOutBound(anyString(), anyString(), any(LocalDateTime.class), anyMap(), any(Exception.class), any(ServiceCallType.class), anyString(), anyString(), anyString(), anyLong());
+    @Test
+    void testRetriveEvents() {
+        String eventId = "testEventId";
+        EventsDTO expectedEvent = new EventsDTO();
+        
+        // Mocking the behavior of testSqlQueries
+        when(testSqlQueries.getFetchEvents()).thenReturn("SELECT * FROM Events WHERE eventId = :eventId");
+        
+        // Mocking the behavior of entityManager and query
+        when(entityManager.createNativeQuery(anyString(), eq(EventsDTO.class))).thenReturn(query);
+        when(query.setParameter(eq("EVENT_ID"), eq(eventId))).thenReturn(query);
+        when(query.getSingleResult()).thenReturn(expectedEvent);
+
+        // Call the method
+        EventsDTO actualEvent = h2DBConnector.retriveEvents(eventId);
+
+        // Assertions
+        assertNotNull(actualEvent);
+        assertEquals(expectedEvent, actualEvent);
+
+        // Verify that the methods were called with the correct parameters
+        verify(entityManager).createNativeQuery("SELECT * FROM Events WHERE eventId = :eventId", EventsDTO.class);
+        verify(query).setParameter("EVENT_ID", eventId);
+        verify(query).getSingleResult();
+    }
 }

@@ -29,8 +29,11 @@ class H2DBConnectorTest {
 
     @Test
     void testRetriveEvents() {
-        String eventId = "testEventId";
+        String eventId = "123-4023-2302";
         EventsDTO expectedEvent = new EventsDTO();
+        expectedEvent.setEventName("FIN-PROF-CHNGD");
+        expectedEvent.setTypeReference("CAEV03V1");
+        // Add other properties to expectedEvent as needed
         
         // Mocking the behavior of testSqlQueries
         when(testSqlQueries.getFetchEvents()).thenReturn("SELECT * FROM Events WHERE eventId = :eventId");
@@ -40,12 +43,14 @@ class H2DBConnectorTest {
         when(query.setParameter(eq("EVENT_ID"), eq(eventId))).thenReturn(query);
         when(query.getSingleResult()).thenReturn(expectedEvent);
 
-        // Call the method
+        // Act
         EventsDTO actualEvent = h2DBConnector.retriveEvents(eventId);
 
-        // Assertions
+        // Assert
         assertNotNull(actualEvent);
-        assertEquals(expectedEvent, actualEvent);
+        assertEquals("FIN-PROF-CHNGD", actualEvent.getEventName());
+        assertEquals("CAEV03V1", actualEvent.getTypeReference());
+        // Add other assertions as needed
 
         // Verify that the methods were called with the correct parameters
         verify(entityManager).createNativeQuery("SELECT * FROM Events WHERE eventId = :eventId", EventsDTO.class);

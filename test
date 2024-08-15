@@ -1,60 +1,28 @@
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import javax.persistence.EntityManager;
-import javax.persistence.Query;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 
-class H2DBConnectorTest {
+public class ReadFixture {
 
-    @Mock
-    private EntityManager entityManager;
-
-    @Mock
-    private TestSqlQueries testSqlQueries;
-
-    @Mock
-    private Query query;
-
-    @InjectMocks
-    private H2DBConnector h2DBConnector;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-    }
-
-    @Test
-    void testRetriveEvents() {
-        String eventId = "123-4023-2302";
-        EventsDTO expectedEvent = new EventsDTO();
-        expectedEvent.setEventName("FIN-PROF-CHNGD");
-        expectedEvent.setTypeReference("CAEV03V1");
-        // Add other properties to expectedEvent as needed
+    public static String readFixture(String path) throws IOException {
+        // Print the current working directory
+        System.out.println("Current working directory: " + System.getProperty("user.dir"));
         
-        // Mocking the behavior of testSqlQueries
-        when(testSqlQueries.getFetchEvents()).thenReturn("SELECT * FROM Events WHERE eventId = :eventId");
+        // Print the relative path being passed
+        System.out.println("Relative path provided: " + path);
         
-        // Mocking the behavior of entityManager and query
-        when(entityManager.createNativeQuery(anyString(), eq(EventsDTO.class))).thenReturn(query);
-        when(query.setParameter(eq("EVENT_ID"), eq(eventId))).thenReturn(query);
-        when(query.getSingleResult()).thenReturn(expectedEvent);
+        // Construct the full path where the file should be located
+        Path fullPath = Paths.get("src/test/resources/fixtures/", path);
+        
+        // Print the absolute path it is trying to find the file in
+        System.out.println("Absolute path where it is trying to find the file: " + fullPath.toAbsolutePath());
 
-        // Act
-        EventsDTO actualEvent = h2DBConnector.retriveEvents(eventId);
-
-        // Assert
-        assertNotNull(actualEvent);
-        assertEquals("FIN-PROF-CHNGD", actualEvent.getEventName());
-        assertEquals("CAEV03V1", actualEvent.getTypeReference());
-        // Add other assertions as needed
-
-        // Verify that the methods were called with the correct parameters
-        verify(entityManager).createNativeQuery("SELECT * FROM Events WHERE eventId = :eventId", EventsDTO.class);
-        verify(query).setParameter("EVENT_ID", eventId);
-        verify(query).getSingleResult();
+        // Read the file content
+        byte[] encoded = Files.readAllBytes(fullPath);
+        
+        // Return the content as a string
+        return new String(encoded, StandardCharsets.UTF_8);
     }
 }

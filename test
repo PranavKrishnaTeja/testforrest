@@ -1,43 +1,90 @@
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.charset.StandardCharsets;
-import java.io.File;
+public class CsvItemReader extends FlatFileItemReader<YourCustomRecord> {
 
-public class ReadFixture {
-
-    public static String readFixture(String path) throws IOException {
-        // Print the current working directory
-        String currentDir = System.getProperty("user.dir");
-        System.out.println("Current working directory: " + currentDir);
-        
-        // List and print all files in the directory two levels up
-        File upperDirectory = new File(currentDir + "/../../");
-        File[] filesList = upperDirectory.listFiles();
-        
-        System.out.println("Contents of the directory two levels up (../../):");
-        if (filesList != null) {
-            for (File file : filesList) {
-                System.out.println(file.getAbsolutePath());
-            }
-        } else {
-            System.out.println("The directory is empty or does not exist.");
-        }
-        
-        // Print the relative path provided
-        System.out.println("Relative path provided: " + path);
-        
-        // Construct the full path where the file should be located
-        Path fullPath = Paths.get("src/test/resources/fixtures/", path);
-        
-        // Print the absolute path it is trying to find the file in
-        System.out.println("Absolute path where it is trying to find the file: " + fullPath.toAbsolutePath());
-
-        // Read the file content
-        byte[] encoded = Files.readAllBytes(fullPath);
-        
-        // Return the content as a string
-        return new String(encoded, StandardCharsets.UTF_8);
+    public CsvItemReader(Resource resource) {
+        setResource(resource);
+        setLinesToSkip(1); // Skip header
+        setLineMapper(new DefaultLineMapper<YourCustomRecord>() {{
+            setLineTokenizer(new DelimitedLineTokenizer() {{
+                setNames("field1", "field2", "field3"); // Define fields
+            }});
+            setFieldSetMapper(new BeanWrapperFieldSetMapper<YourCustomRecord>() {{
+                setTargetType(YourCustomRecord.class);
+            }});
+        }});
     }
+}
+
+
+
+
+
+public class CsvToAvroProcessor implements ItemProcessor<YourCustomRecord, GenericRecord> {
+
+    private final Schema avroSchema;
+
+    public CsvToAvroProcessor(Schema avroSchema) {
+        this.avroSchema = avroSchema;
+    }
+
+    @Override
+    public GenericRecord process(YourCustomRecord item) {
+        GenericRecord avroRecord = new GenericData.Record(avroSchema);
+        avroRecord.put("field1", item.getField1());
+        avroRecord.put("field2", item.getField2());
+        // Map all fields
+        return avroRecord;
+    }
+}
+
+
+
+
+
+
+
+
+public class AvroItemWriter implements ItemWriter<GenericRecord> {
+
+    private final DataFileWriter<GenericRecord> dataFileWriter;
+
+    public AvroItemWriter(File outputFile, Schema avroSchema) throws IOException {
+        this.dataFileWriter = new DataFileWriter<>(new GenericDatumWriter<>(avroSchema));
+        dataFileWriter.create(avroSchema, outputFile);
+    }
+
+    @Override
+    public void write(List<? extends GenericRecord> items) throws Exception {
+        for (GenericRecord item : items) {
+            dataFileWriter.append(item);
+        }
+    }
+
+    public void close() throws IOException {
+        dataFileWriter.close();
+    }
+}
+
+
+
+
+
+
+
+
+@Bean(name = "csvToAvroConversionJob")
+public Job csvToAvroConversionJob(JobRepository jobRepository, Step step) {
+    return new JobBuilder("csvToAvroConversionJob", jobRepository)
+        .start(step)
+        .build();
+}
+
+@Bean(name = "csvToAvroConversionStep")
+public Step csvToAvroConversionStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
+    return new StepBuilder("csvToAvroConversionStep", jobRepository)
+        .<YourCustomRecord, GenericRecord>chunk(100)
+        .reader(csvItemReader())  // Custom CSV ItemReader
+        .processor(csvToAvroProcessor())  // Custom Processor
+        .writer(avroItemWriter())  // Custom Avro Writer
+        .transactionManager(transactionManager)
+        .build();
 }

@@ -1,66 +1,77 @@
-public class CsvItemReader extends FlatFileItemReader<YourCustomRecord> {
+package com.schwab.cdt.spos.source.converter;
 
-    public CsvItemReader(Resource resource) {
-        setResource(resource);
-        setLinesToSkip(1); // Skip header
-        setLineMapper(new DefaultLineMapper<YourCustomRecord>() {{
-            setLineTokenizer(new DelimitedLineTokenizer() {{
-                setNames("field1", "field2", "field3"); // Define fields
-            }});
-            setFieldSetMapper(new BeanWrapperFieldSetMapper<YourCustomRecord>() {{
-                setTargetType(YourCustomRecord.class);
-            }});
-        }});
-    }
-}
+import org.apache.avro.Schema;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.springframework.stereotype.Component;
 
+import java.io.*;
+import java.util.Arrays;
+import java.util.List;
 
+@Component
+public class CsvToAvroConverter {
 
+    public void convertCsvToAvro(String csvFilePath, String schemaFilePath, String avroFilePath, String delimiter) throws IOException {
+        // Load Avro schema from file
+        Schema schema = new Schema.Parser().parse(new File(schemaFilePath));
 
+        // Create Avro writer
+        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+        try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter)) {
+            dataFileWriter.create(schema, new File(avroFilePath));
 
-public class CsvToAvroProcessor implements ItemProcessor<YourCustomRecord, GenericRecord> {
+            // Open CSV file and read records
+            try (BufferedReader br = new BufferedReader(new FileReader(csvFilePath))) {
+                String line;
+                List<String> headers = null;
 
-    private final Schema avroSchema;
-
-    public CsvToAvroProcessor(Schema avroSchema) {
-        this.avroSchema = avroSchema;
-    }
-
-    @Override
-    public GenericRecord process(YourCustomRecord item) {
-        GenericRecord avroRecord = new GenericData.Record(avroSchema);
-        avroRecord.put("field1", item.getField1());
-        avroRecord.put("field2", item.getField2());
-        // Map all fields
-        return avroRecord;
-    }
-}
-
-
-
-
-
-
-
-
-public class AvroItemWriter implements ItemWriter<GenericRecord> {
-
-    private final DataFileWriter<GenericRecord> dataFileWriter;
-
-    public AvroItemWriter(File outputFile, Schema avroSchema) throws IOException {
-        this.dataFileWriter = new DataFileWriter<>(new GenericDatumWriter<>(avroSchema));
-        dataFileWriter.create(avroSchema, outputFile);
-    }
-
-    @Override
-    public void write(List<? extends GenericRecord> items) throws Exception {
-        for (GenericRecord item : items) {
-            dataFileWriter.append(item);
+                while ((line = br.readLine()) != null) {
+                    String[] values = line.split(delimiter);
+                    if (headers == null) {
+                        // First line contains headers
+                        headers = Arrays.asList(values);
+                    } else {
+                        // Create Avro record and set fields
+                        GenericRecord record = new GenericData.Record(schema);
+                        for (int i = 0; i < values.length; i++) {
+                            record.put(headers.get(i), parseValue(values[i], schema.getField(headers.get(i)).schema()));
+                        }
+                        dataFileWriter.append(record);
+                    }
+                }
+            }
         }
     }
 
-    public void close() throws IOException {
-        dataFileWriter.close();
+    private Object parseValue(String value, Schema fieldSchema) {
+        // Implement parsing logic based on the field schema type
+        switch (fieldSchema.getType()) {
+            case INT:
+                return Integer.parseInt(value);
+            case LONG:
+                return Long.parseLong(value);
+            case FLOAT:
+                return Float.parseFloat(value);
+            case DOUBLE:
+                return Double.parseDouble(value);
+            case BOOLEAN:
+                return Boolean.parseBoolean(value);
+            case STRING:
+                return value;
+            case UNION:
+                // Handle union types (e.g., ["null", "string"])
+                for (Schema type : fieldSchema.getTypes()) {
+                    if (!type.getType().equals(Schema.Type.NULL)) {
+                        return parseValue(value, type);
+                    }
+                }
+            default:
+                return value;
+        }
     }
 }
 
@@ -71,20 +82,101 @@ public class AvroItemWriter implements ItemWriter<GenericRecord> {
 
 
 
-@Bean(name = "csvToAvroConversionJob")
-public Job csvToAvroConversionJob(JobRepository jobRepository, Step step) {
-    return new JobBuilder("csvToAvroConversionJob", jobRepository)
-        .start(step)
+
+
+
+@Configuration
+public class DataIngestionJobBuilder {
+
+    private final JobRepository jobRepository;
+    private final PlatformTransactionManager transactionManager;
+    private final CsvToAvroConverter csvToAvroConverter;
+    private final AggregateFactory aggregateFactory;
+
+    @Autowired
+    public DataIngestionJobBuilder(JobRepository jobRepository,
+                                   PlatformTransactionManager transactionManager,
+                                   CsvToAvroConverter csvToAvroConverter,
+                                   AggregateFactory aggregateFactory) {
+        this.jobRepository = jobRepository;
+        this.transactionManager = transactionManager;
+        this.csvToAvroConverter = csvToAvroConverter;
+        this.aggregateFactory = aggregateFactory;
+    }
+
+    @Bean(name = "csvToAvroConversionStep")
+    public Step csvToAvroConversionStep() {
+        // Filter aggregates with definition 'csv_to_avro'
+        List<AggregateFactory.Aggregate> csvToAvroAggregates = aggregateFactory.aggregates().stream()
+            .filter(aggregate -> "csv_to_avro".equalsIgnoreCase(aggregate.definition()))
+            .collect(Collectors.toList());
+
+        // Create a reader for the configurations
+        ListItemReader<AggregateFactory.Aggregate> reader = new ListItemReader<>(csvToAvroAggregates);
+
+        // Processor that performs the conversion
+        ItemWriter<AggregateFactory.Aggregate> processor = items -> {
+            for (AggregateFactory.Aggregate aggregate : items) {
+                csvToAvroConverter.convertCsvToAvro(
+                    aggregate.sourceFile(),
+                    aggregate.avroSchema(),
+                    aggregate.targetAvroFile(),
+                    aggregate.delimiter()
+                );
+            }
+        };
+
+        return new StepBuilder("csvToAvroConversionStep", jobRepository)
+            .<AggregateFactory.Aggregate, AggregateFactory.Aggregate>chunk(1, transactionManager)
+            .reader(reader)
+            .writer(processor)
+            .build();
+    }
+
+    // Rest of your job definitions...
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+@Bean(name = "csvToAvroDataIngestionJob")
+public Job csvToAvroDataIngestionJob() {
+    return new JobBuilder("csvToAvroDataIngestionJob", jobRepository)
+        .incrementer(new RunIdIncrementer())
+        .start(csvToAvroConversionStep()) // Conversion step
+        .next(avroDataIngestionStep())    // Existing Avro ingestion step
         .build();
 }
 
-@Bean(name = "csvToAvroConversionStep")
-public Step csvToAvroConversionStep(JobRepository jobRepository, PlatformTransactionManager transactionManager) {
-    return new StepBuilder("csvToAvroConversionStep", jobRepository)
-        .<YourCustomRecord, GenericRecord>chunk(100)
-        .reader(csvItemReader())  // Custom CSV ItemReader
-        .processor(csvToAvroProcessor())  // Custom Processor
-        .writer(avroItemWriter())  // Custom Avro Writer
-        .transactionManager(transactionManager)
-        .build();
+
+
+
+
+
+
+
+
+public record AggregateFactory(List<Aggregate> aggregates) {
+
+    public record Aggregate(String name,
+                            SourceSchema sourceSchema,
+                            Table table,
+                            String sql,
+                            String sourceFile,
+                            String avroSchema,
+                            String targetAvroFile,
+                            String delimiter,
+                            String definition) {
+    }
+
+    // Existing records (Table, Columns, Metadata, SourceSchema) remain the same
 }

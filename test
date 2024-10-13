@@ -1,11 +1,51 @@
+package com.schwab.cdt.spos.source.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Configuration
+@ConfigurationProperties(prefix = "csv-to-avro")
+public class CsvToAvroConfig {
+
+    private List<Conversion> conversions;
+
+    public List<Conversion> getConversions() {
+        return conversions;
+    }
+
+    public void setConversions(List<Conversion> conversions) {
+        this.conversions = conversions;
+    }
+
+    public static class Conversion {
+        private String name;
+        private String sourceFile;
+        private String avroSchema;
+        private String targetAvroFile;
+        private String delimiter;
+
+        // Getters and setters...
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
 package com.schwab.cdt.spos.source.converter;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.generic.*;
 import org.apache.avro.io.DatumWriter;
-import org.apache.avro.generic.GenericDatumWriter;
 import org.springframework.stereotype.Component;
 
 import java.io.*;
@@ -38,7 +78,10 @@ public class CsvToAvroConverter {
                         // Create Avro record and set fields
                         GenericRecord record = new GenericData.Record(schema);
                         for (int i = 0; i < values.length; i++) {
-                            record.put(headers.get(i), parseValue(values[i], schema.getField(headers.get(i)).schema()));
+                            // Handle different data types based on schema
+                            Schema.Field field = schema.getFields().get(i);
+                            Object convertedValue = convertValue(values[i], field.schema());
+                            record.put(headers.get(i), convertedValue);
                         }
                         dataFileWriter.append(record);
                     }
@@ -47,8 +90,8 @@ public class CsvToAvroConverter {
         }
     }
 
-    private Object parseValue(String value, Schema fieldSchema) {
-        // Implement parsing logic based on the field schema type
+    private Object convertValue(String value, Schema fieldSchema) {
+        // Implement type conversion based on field schema
         switch (fieldSchema.getType()) {
             case INT:
                 return Integer.parseInt(value);
@@ -62,13 +105,9 @@ public class CsvToAvroConverter {
                 return Boolean.parseBoolean(value);
             case STRING:
                 return value;
-            case UNION:
-                // Handle union types (e.g., ["null", "string"])
-                for (Schema type : fieldSchema.getTypes()) {
-                    if (!type.getType().equals(Schema.Type.NULL)) {
-                        return parseValue(value, type);
-                    }
-                }
+            case BYTES:
+                return value.getBytes();
+            // Handle other types as needed
             default:
                 return value;
         }
@@ -85,55 +124,100 @@ public class CsvToAvroConverter {
 
 
 
+
+package com.schwab.cdt.spos.source.job.step;
+
+import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
+import com.schwab.cdt.spos.source.converter.CsvToAvroConverter;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+@Component
+public class CsvToAvroConversionStep {
+
+    private final StepBuilderFactory stepBuilderFactory;
+    private final CsvToAvroConverter csvToAvroConverter;
+    private final CsvToAvroConfig csvToAvroConfig;
+
+    public CsvToAvroConversionStep(StepBuilderFactory stepBuilderFactory,
+                                   CsvToAvroConverter csvToAvroConverter,
+                                   CsvToAvroConfig csvToAvroConfig) {
+        this.stepBuilderFactory = stepBuilderFactory;
+        this.csvToAvroConverter = csvToAvroConverter;
+        this.csvToAvroConfig = csvToAvroConfig;
+    }
+
+    public Step csvToAvroConversionStep() {
+        return stepBuilderFactory.get("csvToAvroConversionStep")
+            .tasklet((contribution, chunkContext) -> {
+                // Iterate over all conversions defined in YAML
+                for (CsvToAvroConfig.Conversion conversion : csvToAvroConfig.getConversions()) {
+                    try {
+                        csvToAvroConverter.convertCsvToAvro(
+                            conversion.getSourceFile(),
+                            conversion.getAvroSchema(),
+                            conversion.getTargetAvroFile(),
+                            conversion.getDelimiter()
+                        );
+                    } catch (IOException e) {
+                        throw new RuntimeException("Failed to convert CSV to Avro: " + e.getMessage(), e);
+                    }
+                }
+                return RepeatStatus.FINISHED;
+            })
+            .build();
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+package com.schwab.cdt.spos.source.job;
+
+import com.schwab.cdt.spos.source.job.step.CsvToAvroConversionStep;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
 @Configuration
 public class DataIngestionJobBuilder {
 
     private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
-    private final CsvToAvroConverter csvToAvroConverter;
-    private final AggregateFactory aggregateFactory;
+    private final DataIngestionStepBuilder dataIngestionStepBuilder;
+    private final DataIngestionJobListener dataIngestionJobListener;
+    private final CsvToAvroConversionStep csvToAvroConversionStep;
 
-    @Autowired
-    public DataIngestionJobBuilder(JobRepository jobRepository,
-                                   PlatformTransactionManager transactionManager,
-                                   CsvToAvroConverter csvToAvroConverter,
-                                   AggregateFactory aggregateFactory) {
+    public DataIngestionJobBuilder(DataIngestionStepBuilder dataIngestionStepBuilder,
+                                   JobRepository jobRepository,
+                                   DataIngestionJobListener dataIngestionJobListener,
+                                   CsvToAvroConversionStep csvToAvroConversionStep) {
         this.jobRepository = jobRepository;
-        this.transactionManager = transactionManager;
-        this.csvToAvroConverter = csvToAvroConverter;
-        this.aggregateFactory = aggregateFactory;
+        this.dataIngestionStepBuilder = dataIngestionStepBuilder;
+        this.dataIngestionJobListener = dataIngestionJobListener;
+        this.csvToAvroConversionStep = csvToAvroConversionStep;
     }
 
-    @Bean(name = "csvToAvroConversionStep")
-    public Step csvToAvroConversionStep() {
-        // Filter aggregates with definition 'csv_to_avro'
-        List<AggregateFactory.Aggregate> csvToAvroAggregates = aggregateFactory.aggregates().stream()
-            .filter(aggregate -> "csv_to_avro".equalsIgnoreCase(aggregate.definition()))
-            .collect(Collectors.toList());
-
-        // Create a reader for the configurations
-        ListItemReader<AggregateFactory.Aggregate> reader = new ListItemReader<>(csvToAvroAggregates);
-
-        // Processor that performs the conversion
-        ItemWriter<AggregateFactory.Aggregate> processor = items -> {
-            for (AggregateFactory.Aggregate aggregate : items) {
-                csvToAvroConverter.convertCsvToAvro(
-                    aggregate.sourceFile(),
-                    aggregate.avroSchema(),
-                    aggregate.targetAvroFile(),
-                    aggregate.delimiter()
-                );
-            }
-        };
-
-        return new StepBuilder("csvToAvroConversionStep", jobRepository)
-            .<AggregateFactory.Aggregate, AggregateFactory.Aggregate>chunk(1, transactionManager)
-            .reader(reader)
-            .writer(processor)
+    @Bean(name = "csvToAvroDataIngestionJob")
+    public Job csvToAvroDataIngestionJob() {
+        return new JobBuilder("csvToAvroDataIngestionJob", jobRepository)
+            .incrementer(new RunIdIncrementer())
+            .listener(dataIngestionJobListener)
+            .preventRestart()
+            .start(csvToAvroConversionStep.csvToAvroConversionStep())
+            .next(dataIngestionStepBuilder.avroDataIngestionStep())
             .build();
     }
-
-    // Rest of your job definitions...
 }
 
 
@@ -146,37 +230,25 @@ public class DataIngestionJobBuilder {
 
 
 
+public JobExecution start(String jobName, String executionDate) throws Exception {
+    Job job;
+    var jobMetadata = jobLookUpWithMetadata(jobName);
+    JobParametersBuilder builder = new JobParametersBuilder()
+        .addLocalDateTime("jobDateTime", LocalDateTime.now().atZone(ZoneId.of("America/New_York")).toLocalDateTime())
+        .addString("jobName", jobMetadata.get("jobName"))
+        .addString("definition", jobMetadata.get("definition"))
+        .addString("asOfDate", executionDate);
 
-
-@Bean(name = "csvToAvroDataIngestionJob")
-public Job csvToAvroDataIngestionJob() {
-    return new JobBuilder("csvToAvroDataIngestionJob", jobRepository)
-        .incrementer(new RunIdIncrementer())
-        .start(csvToAvroConversionStep()) // Conversion step
-        .next(avroDataIngestionStep())    // Existing Avro ingestion step
-        .build();
-}
-
-
-
-
-
-
-
-
-
-public record AggregateFactory(List<Aggregate> aggregates) {
-
-    public record Aggregate(String name,
-                            SourceSchema sourceSchema,
-                            Table table,
-                            String sql,
-                            String sourceFile,
-                            String avroSchema,
-                            String targetAvroFile,
-                            String delimiter,
-                            String definition) {
+    switch (jobMetadata.get("definition").toLowerCase()) {
+        case "csv_to_avro":
+            job = csvToAvroDataIngestionJob();
+            break;
+        case "avro_to_postgres":
+            job = avroDataIngestionJob();
+            break;
+        // Handle other cases
+        default:
+            throw new UnsupportedOperationException("Unsupported job definition: " + jobMetadata.get("definition"));
     }
-
-    // Existing records (Table, Columns, Metadata, SourceSchema) remain the same
+    return jobLauncher.run(job, builder.toJobParameters());
 }

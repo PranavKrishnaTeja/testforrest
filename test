@@ -1,185 +1,103 @@
-package com.schwab.cdt.spos.source.job.step;
-
-import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
-import com.schwab.cdt.spos.source.converter.CsvToAvroConverter;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-
-import java.io.IOException;
-
 @Component
-public class CsvToAvroConversionStep {
+public class CsvToAvroConverter {
 
-    private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
-    private final CsvToAvroConverter csvToAvroConverter;
-    private final CsvToAvroConfig csvToAvroConfig;
+    public void convertCsvToAvro(String csvFilePath, String schemaFilePath, String avroFilePath, String delimiter, String asOfDate) throws IOException {
+        // Load Avro schema from file
+        Schema schema = new Schema.Parser().parse(new File(schemaFilePath));
 
-    public CsvToAvroConversionStep(JobRepository jobRepository,
-                                   PlatformTransactionManager transactionManager,
-                                   CsvToAvroConverter csvToAvroConverter,
-                                   CsvToAvroConfig csvToAvroConfig) {
-        this.jobRepository = jobRepository;
-        this.transactionManager = transactionManager;
-        this.csvToAvroConverter = csvToAvroConverter;
-        this.csvToAvroConfig = csvToAvroConfig;
-    }
+        // Create Avro writer
+        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+        try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter)) {
+            dataFileWriter.create(schema, new File(avroFilePath));
 
-    public Step csvToAvroConversionStep() {
-        return new StepBuilder("csvToAvroConversionStep", jobRepository)
-            .task((contribution, chunkContext) -> {
-                // Iterate over all conversions defined in YAML
-                for (CsvToAvroConfig.Conversion conversion : csvToAvroConfig.getConversions()) {
-                    try {
-                        csvToAvroConverter.convertCsvToAvro(
-                            conversion.getSourceFile(),
-                            conversion.getAvroSchema(),
-                            conversion.getTargetAvroFile(),
-                            conversion.getDelimiter()
-                        );
-                    } catch (IOException e) {
-                        throw new RuntimeException("Failed to convert CSV to Avro: " + e.getMessage(), e);
+            // Open CSV file and read records
+            try (BufferedReader br = new BufferedReader(new FileReader(csvFilePath))) {
+                String line;
+                List<String> headers = null;
+
+                while ((line = br.readLine()) != null) {
+                    String[] values = line.split(delimiter, -1); // Include trailing empty strings
+                    if (headers == null) {
+                        // First line contains headers
+                        headers = Arrays.asList(values);
+                    } else {
+                        // Create Avro record and set fields
+                        GenericRecord record = new GenericData.Record(schema);
+
+                        // Set asOfDate from job parameter
+                        if (asOfDate == null || asOfDate.isEmpty()) {
+                            throw new IllegalArgumentException("asOfDate parameter is required and cannot be null or empty.");
+                        }
+                        record.put("asOfDate", asOfDate);
+
+                        for (int i = 0; i < headers.size(); i++) {
+                            String fieldName = headers.get(i);
+                            Schema.Field field = schema.getField(fieldName);
+                            Schema fieldSchema = field.schema();
+                            String csvValue = i < values.length ? values[i] : null;
+                            Object convertedValue = convertValue(csvValue, fieldSchema);
+                            record.put(fieldName, convertedValue);
+                        }
+                        dataFileWriter.append(record);
                     }
                 }
-                return org.springframework.batch.repeat.RepeatStatus.FINISHED;
-            })
-            .transactionManager(transactionManager)
-            .build();
+            }
+        }
+    }
+
+    private Object convertValue(String value, Schema fieldSchema) {
+        Schema actualSchema = getNonNullSchema(fieldSchema);
+
+        // Handle null values
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+
+        switch (actualSchema.getType()) {
+            case INT:
+                if (actualSchema.getLogicalType() != null && "date".equals(actualSchema.getLogicalType().getName())) {
+                    // Convert date string to days since epoch
+                    LocalDate date = LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                    return (int) date.toEpochDay();
+                }
+                return Integer.parseInt(value);
+            case LONG:
+                return Long.parseLong(value);
+            case FLOAT:
+                return Float.parseFloat(value);
+            case DOUBLE:
+                return Double.parseDouble(value);
+            case BOOLEAN:
+                return Boolean.parseBoolean(value);
+            case STRING:
+                return value;
+            case BYTES:
+                if (actualSchema.getLogicalType() != null && "decimal".equals(actualSchema.getLogicalType().getName())) {
+                    // Convert string to BigDecimal and then to bytes
+                    BigDecimal decimalValue = new BigDecimal(value);
+                    LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) actualSchema.getLogicalType();
+                    return new Conversions.DecimalConversion().toBytes(
+                        decimalValue,
+                        actualSchema,
+                        decimalType
+                    );
+                }
+                return value.getBytes();
+            default:
+                throw new UnsupportedOperationException("Unsupported field type: " + actualSchema.getType());
+        }
+    }
+
+    private Schema getNonNullSchema(Schema schema) {
+        if (schema.getType() == Schema.Type.UNION) {
+            for (Schema type : schema.getTypes()) {
+                if (type.getType() != Schema.Type.NULL) {
+                    return type;
+                }
+            }
+            throw new IllegalArgumentException("No non-null type found in union schema: " + schema);
+        } else {
+            return schema;
+        }
     }
 }
-
-
-
-
-
-
-
-
-@Bean
-public JobRepository jobRepository(DataSource dataSource, PlatformTransactionManager transactionManager) throws Exception {
-    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
-    factory.setDataSource(dataSource);
-    factory.setTransactionManager(transactionManager);
-    factory.afterPropertiesSet();
-    return factory.getObject();
-}
-
-
-
-
-
-
-
-
-package com.schwab.cdt.spos.source.job;
-
-import com.schwab.cdt.spos.source.job.step.CsvToAvroConversionStep;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.transaction.PlatformTransactionManager;
-
-@Configuration
-public class DataIngestionJobBuilder {
-
-    private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
-    private final DataIngestionStepBuilder dataIngestionStepBuilder;
-    private final DataIngestionJobListener dataIngestionJobListener;
-    private final CsvToAvroConversionStep csvToAvroConversionStep;
-
-    public DataIngestionJobBuilder(DataIngestionStepBuilder dataIngestionStepBuilder,
-                                   JobRepository jobRepository,
-                                   PlatformTransactionManager transactionManager,
-                                   DataIngestionJobListener dataIngestionJobListener,
-                                   CsvToAvroConversionStep csvToAvroConversionStep) {
-        this.jobRepository = jobRepository;
-        this.transactionManager = transactionManager;
-        this.dataIngestionStepBuilder = dataIngestionStepBuilder;
-        this.dataIngestionJobListener = dataIngestionJobListener;
-        this.csvToAvroConversionStep = csvToAvroConversionStep;
-    }
-
-    @Bean(name = "csvToAvroDataIngestionJob")
-    public Job csvToAvroDataIngestionJob() {
-        return new JobBuilder("csvToAvroDataIngestionJob", jobRepository)
-            .incrementer(new org.springframework.batch.core.launch.support.RunIdIncrementer())
-            .listener(dataIngestionJobListener)
-            .preventRestart()
-            .start(csvToAvroConversionStep.csvToAvroConversionStep())
-            .next(dataIngestionStepBuilder.avroDataIngestionStep())
-            .build();
-    }
-}
-
-
-
-
-
-
-
-
-
-package com.schwab.cdt.spos.source.job.step;
-
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.StepBuilder;
-// ... other imports
-
-@Configuration
-public class DataIngestionStepBuilder {
-
-    private final JobRepository jobRepository;
-    private final PlatformTransactionManager transactionManager;
-    // ... other dependencies
-
-    public DataIngestionStepBuilder(JobRepository jobRepository,
-                                    PlatformTransactionManager transactionManager,
-                                    // ... other dependencies
-                                    ) {
-        this.jobRepository = jobRepository;
-        this.transactionManager = transactionManager;
-        // ... initialize other dependencies
-    }
-
-    @Bean(name = "avroDataIngestionStep")
-    public Step avroDataIngestionStep() {
-        return new StepBuilder("avroDataIngestionMasterStep", jobRepository)
-            .partitioner("avroDataIngestionSlaveStep", partitioner)
-            .step(avroDataIngestionSlaveStep())
-            .taskExecutor(this.taskExecutor)
-            .build();
-    }
-
-    public Step avroDataIngestionSlaveStep() {
-        return new StepBuilder("avroDataIngestionSlaveStep", jobRepository)
-            .<GenericRecord, AggregateFactory.Aggregate>chunk(this.chunkSize, transactionManager)
-            .faultTolerant()
-            .skipPolicy(skipPolicy)
-            .listener(stepExecutionListener)
-            .reader(avroItemReader)
-            .listener(itemReadListener)
-            .processor(sposItemProcessor)
-            .writer(postgresItemWriter)
-            .listener(postgresItemWriteListener)
-            .retryLimit(3)
-            .retry(org.springframework.dao.TransientDataAccessException.class)
-            .build();
-    }
-    // ... other steps
-}
-
-
-
-
-
-
-
-
-

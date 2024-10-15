@@ -1,12 +1,213 @@
+package com.example.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+@ConfigurationProperties(prefix = "csv-to-avro")
+public class CsvToAvroConfig {
+
+    private List<Conversion> conversions;
+
+    // Getters and setters
+
+    public static class Conversion {
+        private String name;
+        private String sourceFile;
+        private String avroSchemaOutput;
+        private String targetAvroFile;
+        private String avroSchemaName;
+        private String type;
+        private String delimiter;
+        private SkipPolicy skipPolicy;
+        private List<FieldMapping> fieldMappingList;
+        private List<String> includedFields;
+
+        // Getters and setters
+
+        public static class SkipPolicy {
+            private boolean skipFirstLine;
+            // Getters and setters
+        }
+
+        public static class FieldMapping {
+            private String name;
+            private String type;
+            private String format;
+            private Precision precision;
+
+            // Getters and setters
+
+            public static class Precision {
+                private int beforeDecimal;
+                private int afterDecimal;
+                // Getters and setters
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.example.service;
+
+import com.example.config.CsvToAvroConfig.Conversion;
+import com.example.config.CsvToAvroConfig.Conversion.FieldMapping;
+import org.apache.avro.LogicalTypes;
+import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilder;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class AvroSchemaGenerator {
+
+    public Schema generateSchema(Conversion conversion) {
+        String schemaName = conversion.getAvroSchemaName();
+        String namespace = "com.example.avro." + schemaName.replace("-", "").toLowerCase();
+
+        // Filter the field mappings to include only the fields specified in includedFields
+        List<FieldMapping> includedFieldMappings = getIncludedFieldMappings(conversion);
+
+        SchemaBuilder.FieldAssembler<Schema> fieldAssembler = SchemaBuilder
+                .record(schemaName)
+                .namespace(namespace)
+                .fields();
+
+        for (FieldMapping field : includedFieldMappings) {
+            addField(fieldAssembler, field);
+        }
+
+        return fieldAssembler.endRecord();
+    }
+
+    private List<FieldMapping> getIncludedFieldMappings(Conversion conversion) {
+        Set<String> includedFieldsSet = new HashSet<>(conversion.getIncludedFields());
+        return conversion.getFieldMappingList().stream()
+                .filter(fieldMapping -> includedFieldsSet.contains(fieldMapping.getName()))
+                .collect(Collectors.toList());
+    }
+
+    private void addField(SchemaBuilder.FieldAssembler<Schema> fieldAssembler, FieldMapping fieldDefinition) {
+        String fieldName = fieldDefinition.getName();
+        String fieldType = fieldDefinition.getType().toUpperCase();
+
+        switch (fieldType) {
+            case "STRING":
+                fieldAssembler.optionalString(fieldName);
+                break;
+            case "INT":
+                fieldAssembler.optionalInt(fieldName);
+                break;
+            case "LONG":
+                fieldAssembler.optionalLong(fieldName);
+                break;
+            case "DATE":
+                Schema dateType = LogicalTypes.date().addToSchema(Schema.create(Schema.Type.INT));
+                fieldAssembler.name(fieldName).type().unionOf().nullType().and().type(dateType).endUnion().nullDefault();
+                break;
+            case "DECIMAL":
+                int precision = fieldDefinition.getPrecision().getBeforeDecimal() + fieldDefinition.getPrecision().getAfterDecimal();
+                int scale = fieldDefinition.getPrecision().getAfterDecimal();
+                Schema decimalType = LogicalTypes.decimal(precision, scale).addToSchema(Schema.create(Schema.Type.BYTES));
+                fieldAssembler.name(fieldName).type().unionOf().nullType().and().type(decimalType).endUnion().nullDefault();
+                break;
+            // Add other types as needed
+            default:
+                throw new IllegalArgumentException("Unsupported field type: " + fieldType);
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.example.converter;
+
+import com.example.config.CsvToAvroConfig.Conversion;
+import com.example.config.CsvToAvroConfig.Conversion.FieldMapping;
+import com.example.service.AvroSchemaGenerator;
+import org.apache.avro.Schema;
+import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.generic.*;
+import org.apache.avro.io.DatumWriter;
+import org.springframework.stereotype.Component;
+
+import java.io.*;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.stream.Collectors;
+
 @Component
 public class CsvToAvroConverter {
 
-    public void convertCsvToAvro(String csvFilePath, String schemaFilePath, String avroFilePath, String delimiter, String asOfDate) throws IOException {
-        // Load Avro schema from file
-        Schema schema = new Schema.Parser().parse(new File(schemaFilePath));
+    private final AvroSchemaGenerator avroSchemaGenerator;
 
-        // Create Avro writer
-        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+    public CsvToAvroConverter(AvroSchemaGenerator avroSchemaGenerator) {
+        this.avroSchemaGenerator = avroSchemaGenerator;
+    }
+
+    public void convertCsvToAvro(Conversion conversion) throws IOException {
+        // Generate the Avro schema
+        Schema schema = avroSchemaGenerator.generateSchema(conversion);
+
+        // Save the schema to the specified output path
+        writeSchemaToFile(schema, conversion.getAvroSchemaOutput());
+
+        // Proceed with CSV to Avro conversion
+        String csvFilePath = conversion.getSourceFile();
+        String avroFilePath = conversion.getTargetAvroFile();
+        String delimiter = getDelimiter(conversion.getDelimiter());
+        boolean skipFirstLine = conversion.getSkipPolicy().isSkipFirstLine();
+
+        // Get the field mappings for the included fields
+        List<FieldMapping> includedFieldMappings = getIncludedFieldMappings(conversion);
+
+        // Map field names to their indices
+        Map<String, Integer> fieldNameToIndexMap = getFieldIndices(includedFieldMappings);
+
+        // Create GenericData instance for logical types
+        GenericData genericData = new GenericData();
+        genericData.addLogicalTypeConversion(new Conversions.DecimalConversion());
+        genericData.addLogicalTypeConversion(new Conversions.DateConversion());
+
+        // Create DatumWriter using the GenericData instance
+        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema, genericData);
         try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter)) {
             dataFileWriter.create(schema, new File(avroFilePath));
 
@@ -15,37 +216,82 @@ public class CsvToAvroConverter {
                 String line;
                 List<String> headers = null;
 
+                if (skipFirstLine) {
+                    // Read the header line
+                    line = br.readLine();
+                    if (line != null) {
+                        headers = Arrays.asList(line.split(delimiter, -1));
+                    }
+                }
+
                 while ((line = br.readLine()) != null) {
                     String[] values = line.split(delimiter, -1); // Include trailing empty strings
-                    if (headers == null) {
-                        // First line contains headers
-                        headers = Arrays.asList(values);
-                    } else {
-                        // Create Avro record and set fields
-                        GenericRecord record = new GenericData.Record(schema);
 
-                        // Set asOfDate from job parameter
-                        if (asOfDate == null || asOfDate.isEmpty()) {
-                            throw new IllegalArgumentException("asOfDate parameter is required and cannot be null or empty.");
-                        }
-                        record.put("asOfDate", asOfDate);
+                    // Create Avro record and set fields
+                    GenericRecord record = new GenericData.Record(schema);
 
-                        for (int i = 0; i < headers.size(); i++) {
-                            String fieldName = headers.get(i);
-                            Schema.Field field = schema.getField(fieldName);
-                            Schema fieldSchema = field.schema();
-                            String csvValue = i < values.length ? values[i] : null;
-                            Object convertedValue = convertValue(csvValue, fieldSchema);
-                            record.put(fieldName, convertedValue);
-                        }
-                        dataFileWriter.append(record);
+                    for (FieldMapping fieldMapping : includedFieldMappings) {
+                        String fieldName = fieldMapping.getName();
+                        int index = getFieldIndex(fieldName, headers, fieldNameToIndexMap);
+                        String csvValue = index < values.length ? values[index] : null;
+                        Schema.Field field = schema.getField(fieldName);
+                        Schema fieldSchema = field.schema();
+                        Object convertedValue = convertValue(csvValue, fieldSchema, fieldMapping);
+                        record.put(fieldName, convertedValue);
                     }
+                    dataFileWriter.append(record);
                 }
             }
         }
     }
 
-    private Object convertValue(String value, Schema fieldSchema) {
+    private int getFieldIndex(String fieldName, List<String> headers, Map<String, Integer> fieldNameToIndexMap) {
+        if (headers != null) {
+            // Use the index from the headers
+            return headers.indexOf(fieldName);
+        } else {
+            // Use the index from the field mappings
+            return fieldNameToIndexMap.get(fieldName);
+        }
+    }
+
+    private Map<String, Integer> getFieldIndices(List<FieldMapping> includedFieldMappings) {
+        Map<String, Integer> fieldNameToIndexMap = new LinkedHashMap<>();
+        int index = 0;
+        for (FieldMapping fieldMapping : includedFieldMappings) {
+            fieldNameToIndexMap.put(fieldMapping.getName(), index++);
+        }
+        return fieldNameToIndexMap;
+    }
+
+    private List<FieldMapping> getIncludedFieldMappings(Conversion conversion) {
+        Set<String> includedFieldsSet = new HashSet<>(conversion.getIncludedFields());
+        return conversion.getFieldMappingList().stream()
+                .filter(fieldMapping -> includedFieldsSet.contains(fieldMapping.getName()))
+                .collect(Collectors.toList());
+    }
+
+    private void writeSchemaToFile(Schema schema, String outputSchemaFilePath) throws IOException {
+        File file = new File(outputSchemaFilePath);
+        try (FileWriter writer = new FileWriter(file)) {
+            writer.write(schema.toString(true));
+        }
+    }
+
+    private String getDelimiter(String delimiter) {
+        switch (delimiter.toUpperCase()) {
+            case "COMMA":
+                return ",";
+            case "PIPE":
+                return "\\|";
+            case "TAB":
+                return "\\t";
+            default:
+                return delimiter;
+        }
+    }
+
+    private Object convertValue(String value, Schema fieldSchema, FieldMapping fieldDefinition) {
         Schema actualSchema = getNonNullSchema(fieldSchema);
 
         // Handle null values
@@ -57,18 +303,13 @@ public class CsvToAvroConverter {
             case INT:
                 if (actualSchema.getLogicalType() != null && "date".equals(actualSchema.getLogicalType().getName())) {
                     // Convert date string to days since epoch
-                    LocalDate date = LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                    DateTimeFormatter format = DateTimeFormatter.ofPattern(fieldDefinition.getFormat());
+                    LocalDate date = LocalDate.parse(value, format);
                     return (int) date.toEpochDay();
                 }
                 return Integer.parseInt(value);
             case LONG:
                 return Long.parseLong(value);
-            case FLOAT:
-                return Float.parseFloat(value);
-            case DOUBLE:
-                return Double.parseDouble(value);
-            case BOOLEAN:
-                return Boolean.parseBoolean(value);
             case STRING:
                 return value;
             case BYTES:
@@ -77,12 +318,13 @@ public class CsvToAvroConverter {
                     BigDecimal decimalValue = new BigDecimal(value);
                     LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) actualSchema.getLogicalType();
                     return new Conversions.DecimalConversion().toBytes(
-                        decimalValue,
-                        actualSchema,
-                        decimalType
+                            decimalValue,
+                            actualSchema,
+                            decimalType
                     );
                 }
-                return value.getBytes();
+                return ByteBuffer.wrap(value.getBytes());
+            // Handle other types as needed
             default:
                 throw new UnsupportedOperationException("Unsupported field type: " + actualSchema.getType());
         }
@@ -99,5 +341,106 @@ public class CsvToAvroConverter {
         } else {
             return schema;
         }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.example.job.step;
+
+import com.example.config.CsvToAvroConfig;
+import com.example.converter.CsvToAvroConverter;
+import org.springframework.batch.core.Step;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+
+@Component
+public class CsvToAvroConversionStep {
+
+    private final JobRepository jobRepository;
+    private final PlatformTransactionManager transactionManager;
+    private final CsvToAvroConverter csvToAvroConverter;
+    private final CsvToAvroConfig csvToAvroConfig;
+
+    public CsvToAvroConversionStep(JobRepository jobRepository,
+                                   PlatformTransactionManager transactionManager,
+                                   CsvToAvroConverter csvToAvroConverter,
+                                   CsvToAvroConfig csvToAvroConfig) {
+        this.jobRepository = jobRepository;
+        this.transactionManager = transactionManager;
+        this.csvToAvroConverter = csvToAvroConverter;
+        this.csvToAvroConfig = csvToAvroConfig;
+    }
+
+    public Step csvToAvroConversionStep() {
+        return new StepBuilder("csvToAvroConversionStep", jobRepository)
+                .task((contribution, chunkContext) -> {
+                    // Iterate over all conversions defined in YAML
+                    for (CsvToAvroConfig.Conversion conversion : csvToAvroConfig.getConversions()) {
+                        try {
+                            csvToAvroConverter.convertCsvToAvro(conversion);
+                        } catch (Exception e) {
+                            throw new RuntimeException("Failed to convert CSV to Avro for conversion: " + conversion.getName(), e);
+                        }
+                    }
+                    return org.springframework.batch.repeat.RepeatStatus.FINISHED;
+                })
+                .transactionManager(transactionManager)
+                .build();
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+package com.example.job;
+
+import com.example.job.step.CsvToAvroConversionStep;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.stereotype.Component;
+
+@Component
+public class DataIngestionJobBuilder {
+
+    private final JobRepository jobRepository;
+    private final CsvToAvroConversionStep csvToAvroConversionStep;
+
+    public DataIngestionJobBuilder(JobRepository jobRepository,
+                                   CsvToAvroConversionStep csvToAvroConversionStep) {
+        this.jobRepository = jobRepository;
+        this.csvToAvroConversionStep = csvToAvroConversionStep;
+    }
+
+    public Job csvToAvroDataIngestionJob() {
+        return new JobBuilder("csvToAvroDataIngestionJob", jobRepository)
+                .start(csvToAvroConversionStep.csvToAvroConversionStep())
+                .build();
     }
 }

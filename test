@@ -17,168 +17,67 @@ public void convertCsvToAvro(Conversion conversion, String sourceDirectory) thro
         throw new IOException("Could not open csv file");
     }
 
-    // Create Piped Streams
-    PipedOutputStream avroOutputStream = new PipedOutputStream();
-    PipedInputStream avroInputStream = new PipedInputStream(avroOutputStream);
+    // Create a temporary file
+    File tempAvroFile = File.createTempFile("tempAvro", ".avro");
 
-    // Start a new thread to write Avro data to the output stream
-    Thread writerThread = new Thread(() -> {
-        try {
-            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema, genericData);
-            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriter.create(schema, avroOutputStream);
+    // Write Avro data to the temporary file
+    try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(new GenericDatumWriter<>(schema, genericData))) {
+        dataFileWriter.create(schema, tempAvroFile);
 
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(csvInputStream))) {
-                String line;
-                List<String> headers = null;
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(csvInputStream))) {
+            String line;
+            List<String> headers = null;
 
-                if (skipFirstLine) {
-                    line = br.readLine();
-                    if (line != null) {
-                        headers = Arrays.asList(line.split(delimiter, -1));
-                    }
+            if (skipFirstLine) {
+                line = br.readLine();
+                if (line != null) {
+                    headers = Arrays.asList(line.split(delimiter, -1));
                 }
-
-                if (headers == null) {
-                    throw new IllegalArgumentException("CSV file does not contain headers, but headers are required.");
-                }
-
-                Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
-                for (String fieldName : fieldMappings.keySet()) {
-                    int index = headers.indexOf(fieldName);
-                    if (index == -1) {
-                        throw new IllegalArgumentException("Field '" + fieldName + "' not found in CSV headers.");
-                    }
-                    fieldNameToIndexMap.put(fieldName, index);
-                }
-
-                while ((line = br.readLine()) != null) {
-                    String[] values = line.split(delimiter, -1);
-
-                    GenericRecord record = new GenericData.Record(schema);
-
-                    for (Map.Entry<String, Integer> entry : fieldNameToIndexMap.entrySet()) {
-                        String fieldName = entry.getKey();
-                        int index = entry.getValue();
-                        String csvValue = index < values.length ? values[index] : null;
-
-                        FieldMapping fieldMapping = fieldMappings.get(fieldName);
-                        Schema.Field field = schema.getField(fieldName);
-                        Schema fieldSchema = field.schema();
-                        Object convertedValue = convertValue(csvValue, fieldSchema, fieldMapping);
-                        record.put(fieldName, convertedValue);
-                    }
-                    dataFileWriter.append(record);
-                }
-                dataFileWriter.flush();
-                dataFileWriter.close();
-                avroOutputStream.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Error writing Avro data", e);
+
+            if (headers == null) {
+                throw new IllegalArgumentException("CSV file does not contain headers, but headers are required.");
+            }
+
+            Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
+            for (String fieldName : fieldMappings.keySet()) {
+                int index = headers.indexOf(fieldName);
+                if (index == -1) {
+                    throw new IllegalArgumentException("Field '" + fieldName + "' not found in CSV headers.");
+                }
+                fieldNameToIndexMap.put(fieldName, index);
+            }
+
+            while ((line = br.readLine()) != null) {
+                String[] values = line.split(delimiter, -1);
+
+                GenericRecord record = new GenericData.Record(schema);
+
+                for (Map.Entry<String, Integer> entry : fieldNameToIndexMap.entrySet()) {
+                    String fieldName = entry.getKey();
+                    int index = entry.getValue();
+                    String csvValue = index < values.length ? values[index] : null;
+
+                    FieldMapping fieldMapping = fieldMappings.get(fieldName);
+                    Schema.Field field = schema.getField(fieldName);
+                    Schema fieldSchema = field.schema();
+                    Object convertedValue = convertValue(csvValue, fieldSchema, fieldMapping);
+                    record.put(fieldName, convertedValue);
+                }
+                dataFileWriter.append(record);
+            }
         }
-    });
-
-    // Start the writer thread
-    writerThread.start();
-
-    // Use AWS SDK to upload the Avro data from avroInputStream
-    uploadAvroDataToSposUsingAwsSdk(conversion.getTargetAvroFile(), avroInputStream);
-
-    // Wait for the writer thread to finish
-    try {
-        writerThread.join();
-    } catch (InterruptedException e) {
-        throw new RuntimeException("Writer thread interrupted", e);
-    } finally {
-        avroInputStream.close();
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-private void uploadAvroDataToSposUsingAwsSdk(String keyName, InputStream avroInputStream) {
-    // Create an S3Client configured for SPOS
-    S3Client s3Client = SposS3ClientProvider.createSposS3Client(
-        sposConfig.url(), sposConfig.awsAccessKey(), sposConfig.awsSecretKey()
-    );
-
-    // Create a TransferManager for high-level upload
-    S3TransferManager transferManager = S3TransferManager.builder()
-        .s3Client(s3Client)
-        .build();
-
-    // Build the upload request
-    PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-        .bucket(sposConfig.bucket())
-        .key(keyName)
-        .build();
-
-    // Create AsyncRequestBody from InputStream
-    AsyncRequestBody requestBody = AsyncRequestBody.fromInputStream(avroInputStream, OptionalLong.empty());
-
-    // Start the upload
-    UploadRequest uploadRequest = UploadRequest.builder()
-        .putObjectRequest(putObjectRequest)
-        .requestBody(requestBody)
-        .build();
-
-    Upload upload = transferManager.upload(uploadRequest);
-
-    // Wait for the upload to complete
-    try {
-        upload.completionFuture().join();
-        System.out.println("Upload complete!");
+        dataFileWriter.flush();
     } catch (Exception e) {
-        throw new RuntimeException("Error uploading Avro data to SPOS", e);
-    } finally {
-        transferManager.close();
+        throw new RuntimeException(e);
     }
+
+    // Get the file size
+    long contentLength = tempAvroFile.length();
+
+    // Upload the file using AWS SDK
+    uploadAvroFileToSposUsingAwsSdk(conversion.getTargetAvroFile(), tempAvroFile, contentLength);
+
+    // Delete the temporary file
+    tempAvroFile.delete();
 }
-
-
-
-
-
-
-
-
-public class SposS3ClientProvider {
-
-    public static S3Client createSposS3Client(String endpointUrl, String accessKeyId, String secretAccessKey) {
-        AwsBasicCredentials awsCreds = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
-
-        return S3Client.builder()
-                .endpointOverride(URI.create(endpointUrl))
-                .credentialsProvider(StaticCredentialsProvider.create(awsCreds))
-                .region(Region.of("us-east-1")) // Use appropriate region
-                .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(true) // Important for SPOS
-                        .build())
-                .build();
-    }
-}
-
-
-
-
-
-implementation 'software.amazon.awssdk:s3:2.20.0' // Use the latest version
-implementation 'software.amazon.awssdk:transfer-manager:2.20.0'
-
-
-
-int pipeSize = 64 * 1024; // 64 KB buffer size
-PipedOutputStream avroOutputStream = new PipedOutputStream();
-PipedInputStream avroInputStream = new PipedInputStream(avroOutputStream, pipeSize);

@@ -1,178 +1,79 @@
-package com.example.converter;
+public class SposFileUploader {
 
-import com.example.config.CsvToAvroConfig.Conversion;
-import com.example.config.CsvToAvroConfig.Conversion.FieldMapping;
-import com.example.service.AvroSchemaGenerator;
-import org.apache.avro.Schema;
-import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.*;
-import org.apache.avro.io.DatumWriter;
-import org.springframework.stereotype.Component;
+    private final S3Client s3Client;
+    private final String bucketName;
 
-import java.io.*;
-import java.math.BigDecimal;
-import java.nio.ByteBuffer;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.stream.Collectors;
-
-@Component
-public class CsvToAvroConverter {
-
-    private final AvroSchemaGenerator avroSchemaGenerator;
-
-    public CsvToAvroConverter(AvroSchemaGenerator avroSchemaGenerator) {
-        this.avroSchemaGenerator = avroSchemaGenerator;
+    public SposFileUploader(S3Client s3Client, String bucketName) {
+        this.s3Client = s3Client;
+        this.bucketName = bucketName;
     }
 
-    public void convertCsvToAvro(Conversion conversion) throws IOException {
-        // Generate the Avro schema
-        Schema schema = avroSchemaGenerator.generateSchema(conversion);
+    public void uploadFile(String keyName, InputStream inputStream, long contentLength) {
+        try {
+            // Initiate multipart upload
+            CreateMultipartUploadRequest createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
+                    .bucket(bucketName)
+                    .key(keyName)
+                    .build();
 
-        // Save the schema to the specified output path
-        writeSchemaToFile(schema, conversion.getAvroSchemaOutput());
+            CreateMultipartUploadResponse response = s3Client.createMultipartUpload(createMultipartUploadRequest);
+            String uploadId = response.uploadId();
 
-        // Proceed with CSV to Avro conversion
-        String csvFilePath = conversion.getSourceFile();
-        String avroFilePath = conversion.getTargetAvroFile();
-        String delimiter = getDelimiter(conversion.getDelimiter());
-        boolean skipFirstLine = conversion.getSkipPolicy().isSkipFirstLine();
+            // Upload parts
+            int partNumber = 1;
+            List<CompletedPart> completedParts = new ArrayList<>();
 
-        // Map field names to their types and formats
-        Map<String, FieldMapping> fieldMappings = conversion.getFieldMappingList().stream()
-                .collect(Collectors.toMap(FieldMapping::getName, fm -> fm));
+            int partSize = 5 * 1024 * 1024; // 5 MB part size
+            byte[] buffer = new byte[partSize];
+            int bytesRead;
+            long filePosition = 0;
 
-        // Create GenericData instance for logical types
-        GenericData genericData = new GenericData();
-        genericData.addLogicalTypeConversion(new Conversions.DecimalConversion());
-        genericData.addLogicalTypeConversion(new Conversions.DateConversion());
-
-        // Create DatumWriter using the GenericData instance
-        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema, genericData);
-        try (DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter)) {
-            dataFileWriter.create(schema, new File(avroFilePath));
-
-            // Open CSV file and read records
-            try (BufferedReader br = new BufferedReader(new FileReader(csvFilePath))) {
-                String line;
-                List<String> headers = null;
-
-                if (skipFirstLine) {
-                    // Read the header line
-                    line = br.readLine();
-                    if (line != null) {
-                        headers = Arrays.asList(line.split(delimiter, -1));
-                    }
+            while (filePosition < contentLength) {
+                bytesRead = inputStream.read(buffer);
+                if (bytesRead <= 0) {
+                    break;
                 }
 
-                // Ensure headers are available
-                if (headers == null) {
-                    throw new IllegalArgumentException("CSV file does not contain headers, but headers are required.");
-                }
+                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                        .bucket(bucketName)
+                        .key(keyName)
+                        .uploadId(uploadId)
+                        .partNumber(partNumber)
+                        .contentLength((long) bytesRead)
+                        .build();
 
-                // Map field names to column indices
-                Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
-                for (String fieldName : fieldMappings.keySet()) {
-                    int index = headers.indexOf(fieldName);
-                    if (index == -1) {
-                        throw new IllegalArgumentException("Field '" + fieldName + "' not found in CSV headers.");
-                    }
-                    fieldNameToIndexMap.put(fieldName, index);
-                }
+                RequestBody requestBody = RequestBody.fromBytes(Arrays.copyOf(buffer, bytesRead));
 
-                while ((line = br.readLine()) != null) {
-                    String[] values = line.split(delimiter, -1); // Include trailing empty strings
+                UploadPartResponse uploadPartResponse = s3Client.uploadPart(uploadPartRequest, requestBody);
 
-                    // Create Avro record and set fields
-                    GenericRecord record = new GenericData.Record(schema);
+                completedParts.add(CompletedPart.builder()
+                        .partNumber(partNumber)
+                        .eTag(uploadPartResponse.eTag())
+                        .build());
 
-                    for (Map.Entry<String, Integer> entry : fieldNameToIndexMap.entrySet()) {
-                        String fieldName = entry.getKey();
-                        int index = entry.getValue();
-                        String csvValue = index < values.length ? values[index] : null;
-
-                        FieldMapping fieldMapping = fieldMappings.get(fieldName);
-                        Schema.Field field = schema.getField(fieldName);
-                        Schema fieldSchema = field.schema();
-                        Object convertedValue = convertValue(csvValue, fieldSchema, fieldMapping);
-                        record.put(fieldName, convertedValue);
-                    }
-                    dataFileWriter.append(record);
-                }
+                filePosition += bytesRead;
+                partNumber++;
             }
-        }
-    }
 
-    private void writeSchemaToFile(Schema schema, String outputSchemaFilePath) throws IOException {
-        File file = new File(outputSchemaFilePath);
-        try (FileWriter writer = new FileWriter(file)) {
-            writer.write(schema.toString(true));
-        }
-    }
+            // Complete multipart upload
+            CompletedMultipartUpload completedMultipartUpload = CompletedMultipartUpload.builder()
+                    .parts(completedParts)
+                    .build();
 
-    private String getDelimiter(String delimiter) {
-        switch (delimiter.toUpperCase()) {
-            case "COMMA":
-                return ",";
-            case "PIPE":
-                return "\\|";
-            case "TAB":
-                return "\\t";
-            default:
-                return delimiter;
-        }
-    }
+            CompleteMultipartUploadRequest completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
+                    .bucket(bucketName)
+                    .key(keyName)
+                    .uploadId(uploadId)
+                    .multipartUpload(completedMultipartUpload)
+                    .build();
 
-    private Object convertValue(String value, Schema fieldSchema, FieldMapping fieldDefinition) {
-        Schema actualSchema = getNonNullSchema(fieldSchema);
+            s3Client.completeMultipartUpload(completeMultipartUploadRequest);
 
-        // Handle null values
-        if (value == null || value.isEmpty()) {
-            return null;
-        }
+            System.out.println("Upload complete!");
 
-        switch (actualSchema.getType()) {
-            case INT:
-                if (actualSchema.getLogicalType() != null && "date".equals(actualSchema.getLogicalType().getName())) {
-                    // Convert date string to days since epoch
-                    DateTimeFormatter format = DateTimeFormatter.ofPattern(fieldDefinition.getFormat());
-                    LocalDate date = LocalDate.parse(value, format);
-                    return (int) date.toEpochDay();
-                }
-                return Integer.parseInt(value);
-            case LONG:
-                return Long.parseLong(value);
-            case STRING:
-                return value;
-            case BYTES:
-                if (actualSchema.getLogicalType() != null && "decimal".equals(actualSchema.getLogicalType().getName())) {
-                    // Convert string to BigDecimal and then to bytes
-                    BigDecimal decimalValue = new BigDecimal(value);
-                    LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) actualSchema.getLogicalType();
-                    return new Conversions.DecimalConversion().toBytes(
-                            decimalValue,
-                            actualSchema,
-                            decimalType
-                    );
-                }
-                return ByteBuffer.wrap(value.getBytes());
-            // Handle other types as needed
-            default:
-                throw new UnsupportedOperationException("Unsupported field type: " + actualSchema.getType());
-        }
-    }
-
-    private Schema getNonNullSchema(Schema schema) {
-        if (schema.getType() == Schema.Type.UNION) {
-            for (Schema type : schema.getTypes()) {
-                if (type.getType() != Schema.Type.NULL) {
-                    return type;
-                }
-            }
-            throw new IllegalArgumentException("No non-null type found in union schema: " + schema);
-        } else {
-            return schema;
+        } catch (S3Exception | IOException e) {
+            e.printStackTrace();
+            // Handle exceptions and abort multipart upload if necessary
         }
     }
 }

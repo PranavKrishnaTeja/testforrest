@@ -87,7 +87,7 @@ public void convertCsvToAvro(Conversion conversion, String sourceDirectory) thro
 
 
 
-private void uploadAvroDataToSposUsingAwsSdk(String keyName, InputStream avroInputStream) {
+private void uploadAvroFileToSposUsingAwsSdk(String keyName, File avroFile, long contentLength) {
     // Create an S3Client configured for SPOS
     S3Client s3Client = SposS3ClientProvider.createSposS3Client(
         sposConfig.url(), sposConfig.awsAccessKey(), sposConfig.awsSecretKey()
@@ -99,8 +99,8 @@ private void uploadAvroDataToSposUsingAwsSdk(String keyName, InputStream avroInp
         .key(keyName)
         .build();
 
-    // Create RequestBody from InputStream with contentLength = -1 for chunked encoding
-    RequestBody requestBody = RequestBody.fromInputStream(avroInputStream, -1);
+    // Create RequestBody from File
+    RequestBody requestBody = RequestBody.fromFile(avroFile);
 
     // Upload the object
     try {

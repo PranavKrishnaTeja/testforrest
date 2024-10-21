@@ -1,79 +1,184 @@
-public class SposFileUploader {
+public void convertCsvToAvro(Conversion conversion, String sourceDirectory) throws IOException {
+    Schema schema = avroSchemaGenerator.generateSchema(conversion);
+    writeSchemaToSpos(schema, conversion.getAvroSchemaOutput());
+    String delimiter = getDelimiter(conversion.getDelimiter());
+    boolean skipFirstLine = conversion.getSkipPolicy().isSkipFirstLine();
 
-    private final S3Client s3Client;
-    private final String bucketName;
+    Map<String, FieldMapping> fieldMappings = conversion.getFieldMappingList().stream()
+        .collect(Collectors.toMap(FieldMapping::getName, fm -> fm));
 
-    public SposFileUploader(S3Client s3Client, String bucketName) {
-        this.s3Client = s3Client;
-        this.bucketName = bucketName;
+    GenericData genericData = new GenericData();
+    genericData.addLogicalTypeConversion(new Conversions.DecimalConversion());
+    genericData.addLogicalTypeConversion(new TimeConversions.DateConversion());
+
+    String csvFileUrl = fetchLatestCsvFileFromSpos(sourceDirectory);
+    InputStream csvInputStream = sposStreamingClient.streamObjectStore(csvFileUrl);
+    if (csvInputStream == null) {
+        throw new IOException("Could not open csv file");
     }
 
-    public void uploadFile(String keyName, InputStream inputStream, long contentLength) {
+    // Create Piped Streams
+    PipedOutputStream avroOutputStream = new PipedOutputStream();
+    PipedInputStream avroInputStream = new PipedInputStream(avroOutputStream);
+
+    // Start a new thread to write Avro data to the output stream
+    Thread writerThread = new Thread(() -> {
         try {
-            // Initiate multipart upload
-            CreateMultipartUploadRequest createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
-                    .bucket(bucketName)
-                    .key(keyName)
-                    .build();
+            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema, genericData);
+            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
+            dataFileWriter.create(schema, avroOutputStream);
 
-            CreateMultipartUploadResponse response = s3Client.createMultipartUpload(createMultipartUploadRequest);
-            String uploadId = response.uploadId();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(csvInputStream))) {
+                String line;
+                List<String> headers = null;
 
-            // Upload parts
-            int partNumber = 1;
-            List<CompletedPart> completedParts = new ArrayList<>();
-
-            int partSize = 5 * 1024 * 1024; // 5 MB part size
-            byte[] buffer = new byte[partSize];
-            int bytesRead;
-            long filePosition = 0;
-
-            while (filePosition < contentLength) {
-                bytesRead = inputStream.read(buffer);
-                if (bytesRead <= 0) {
-                    break;
+                if (skipFirstLine) {
+                    line = br.readLine();
+                    if (line != null) {
+                        headers = Arrays.asList(line.split(delimiter, -1));
+                    }
                 }
 
-                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
-                        .bucket(bucketName)
-                        .key(keyName)
-                        .uploadId(uploadId)
-                        .partNumber(partNumber)
-                        .contentLength((long) bytesRead)
-                        .build();
+                if (headers == null) {
+                    throw new IllegalArgumentException("CSV file does not contain headers, but headers are required.");
+                }
 
-                RequestBody requestBody = RequestBody.fromBytes(Arrays.copyOf(buffer, bytesRead));
+                Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
+                for (String fieldName : fieldMappings.keySet()) {
+                    int index = headers.indexOf(fieldName);
+                    if (index == -1) {
+                        throw new IllegalArgumentException("Field '" + fieldName + "' not found in CSV headers.");
+                    }
+                    fieldNameToIndexMap.put(fieldName, index);
+                }
 
-                UploadPartResponse uploadPartResponse = s3Client.uploadPart(uploadPartRequest, requestBody);
+                while ((line = br.readLine()) != null) {
+                    String[] values = line.split(delimiter, -1);
 
-                completedParts.add(CompletedPart.builder()
-                        .partNumber(partNumber)
-                        .eTag(uploadPartResponse.eTag())
-                        .build());
+                    GenericRecord record = new GenericData.Record(schema);
 
-                filePosition += bytesRead;
-                partNumber++;
+                    for (Map.Entry<String, Integer> entry : fieldNameToIndexMap.entrySet()) {
+                        String fieldName = entry.getKey();
+                        int index = entry.getValue();
+                        String csvValue = index < values.length ? values[index] : null;
+
+                        FieldMapping fieldMapping = fieldMappings.get(fieldName);
+                        Schema.Field field = schema.getField(fieldName);
+                        Schema fieldSchema = field.schema();
+                        Object convertedValue = convertValue(csvValue, fieldSchema, fieldMapping);
+                        record.put(fieldName, convertedValue);
+                    }
+                    dataFileWriter.append(record);
+                }
+                dataFileWriter.flush();
+                dataFileWriter.close();
+                avroOutputStream.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
-
-            // Complete multipart upload
-            CompletedMultipartUpload completedMultipartUpload = CompletedMultipartUpload.builder()
-                    .parts(completedParts)
-                    .build();
-
-            CompleteMultipartUploadRequest completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
-                    .bucket(bucketName)
-                    .key(keyName)
-                    .uploadId(uploadId)
-                    .multipartUpload(completedMultipartUpload)
-                    .build();
-
-            s3Client.completeMultipartUpload(completeMultipartUploadRequest);
-
-            System.out.println("Upload complete!");
-
-        } catch (S3Exception | IOException e) {
-            e.printStackTrace();
-            // Handle exceptions and abort multipart upload if necessary
+        } catch (IOException e) {
+            throw new RuntimeException("Error writing Avro data", e);
         }
+    });
+
+    // Start the writer thread
+    writerThread.start();
+
+    // Use AWS SDK to upload the Avro data from avroInputStream
+    uploadAvroDataToSposUsingAwsSdk(conversion.getTargetAvroFile(), avroInputStream);
+
+    // Wait for the writer thread to finish
+    try {
+        writerThread.join();
+    } catch (InterruptedException e) {
+        throw new RuntimeException("Writer thread interrupted", e);
+    } finally {
+        avroInputStream.close();
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+private void uploadAvroDataToSposUsingAwsSdk(String keyName, InputStream avroInputStream) {
+    // Create an S3Client configured for SPOS
+    S3Client s3Client = SposS3ClientProvider.createSposS3Client(
+        sposConfig.url(), sposConfig.awsAccessKey(), sposConfig.awsSecretKey()
+    );
+
+    // Create a TransferManager for high-level upload
+    S3TransferManager transferManager = S3TransferManager.builder()
+        .s3Client(s3Client)
+        .build();
+
+    // Build the upload request
+    PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+        .bucket(sposConfig.bucket())
+        .key(keyName)
+        .build();
+
+    // Create AsyncRequestBody from InputStream
+    AsyncRequestBody requestBody = AsyncRequestBody.fromInputStream(avroInputStream, OptionalLong.empty());
+
+    // Start the upload
+    UploadRequest uploadRequest = UploadRequest.builder()
+        .putObjectRequest(putObjectRequest)
+        .requestBody(requestBody)
+        .build();
+
+    Upload upload = transferManager.upload(uploadRequest);
+
+    // Wait for the upload to complete
+    try {
+        upload.completionFuture().join();
+        System.out.println("Upload complete!");
+    } catch (Exception e) {
+        throw new RuntimeException("Error uploading Avro data to SPOS", e);
+    } finally {
+        transferManager.close();
+    }
+}
+
+
+
+
+
+
+
+
+public class SposS3ClientProvider {
+
+    public static S3Client createSposS3Client(String endpointUrl, String accessKeyId, String secretAccessKey) {
+        AwsBasicCredentials awsCreds = AwsBasicCredentials.create(accessKeyId, secretAccessKey);
+
+        return S3Client.builder()
+                .endpointOverride(URI.create(endpointUrl))
+                .credentialsProvider(StaticCredentialsProvider.create(awsCreds))
+                .region(Region.of("us-east-1")) // Use appropriate region
+                .serviceConfiguration(S3Configuration.builder()
+                        .pathStyleAccessEnabled(true) // Important for SPOS
+                        .build())
+                .build();
+    }
+}
+
+
+
+
+
+implementation 'software.amazon.awssdk:s3:2.20.0' // Use the latest version
+implementation 'software.amazon.awssdk:transfer-manager:2.20.0'
+
+
+
+int pipeSize = 64 * 1024; // 64 KB buffer size
+PipedOutputStream avroOutputStream = new PipedOutputStream();
+PipedInputStream avroInputStream = new PipedInputStream(avroOutputStream, pipeSize);

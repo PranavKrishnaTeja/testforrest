@@ -81,3 +81,33 @@ public void convertCsvToAvro(Conversion conversion, String sourceDirectory) thro
     // Delete the temporary file
     tempAvroFile.delete();
 }
+
+
+
+
+
+
+private void uploadAvroDataToSposUsingAwsSdk(String keyName, InputStream avroInputStream) {
+    // Create an S3Client configured for SPOS
+    S3Client s3Client = SposS3ClientProvider.createSposS3Client(
+        sposConfig.url(), sposConfig.awsAccessKey(), sposConfig.awsSecretKey()
+    );
+
+    // Build the put object request
+    PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+        .bucket(sposConfig.bucket())
+        .key(keyName)
+        .build();
+
+    // Create RequestBody from InputStream with contentLength = -1 for chunked encoding
+    RequestBody requestBody = RequestBody.fromInputStream(avroInputStream, -1);
+
+    // Upload the object
+    try {
+        s3Client.putObject(putObjectRequest, requestBody);
+        System.out.println("Upload complete!");
+    } catch (S3Exception e) {
+        e.printStackTrace();
+        throw new RuntimeException("Error uploading Avro data to SPOS", e);
+    }
+}

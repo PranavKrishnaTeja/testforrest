@@ -1,18 +1,20 @@
 import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
 import com.schwab.cdt.spos.source.config.IngestionJobConfig;
-import com.schwab.cdt.spos.source.job.step.CsvToAvroConversionStep;
 import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.*;
-import org.springframework.batch.core.*;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.batch.core.Step;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.scope.context.StepSynchronizationManager;
 
-import java.util.*;
-
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 class CsvToAvroConversionStepTest {
 
@@ -36,71 +38,85 @@ class CsvToAvroConversionStepTest {
 
     @BeforeEach
     void setUp() {
-        MockitoAnnotations.openMocks(this);
+        MockitoAnnotations.initMocks(this);
     }
 
     @Test
-    void testCsvToAvroConversionStep_Success() throws Exception {
-        // Prepare job parameters
-        JobParameters jobParameters = new JobParametersBuilder()
-                .addString("jobName", "testJob")
-                .addString("directory", "testDirectory")
-                .toJobParameters();
+    void testCsvToAvroConversionStep_success() throws Exception {
+        // Arrange
+        CsvToAvroConfig.Conversion conversion = new CsvToAvroConfig.Conversion("test-conversion");
+        when(csvToAvroConfig.getConversions()).thenReturn(List.of(conversion));
+        IngestionJobConfig.Job job = new IngestionJobConfig.Job("test-job", "test-source-dir");
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(job));
 
-        // Mock job and conversion configurations
-        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "testTargetId");
-        when(ingestionJobConfig.jobs()).thenReturn(Collections.singletonList(jobConfig));
+        StepContext stepContext = StepSynchronizationManager.register(new StepContext(new StepExecution("test-step", null)));
+        stepContext.getStepExecution().getJobParameters().put("jobName", "test-job");
+        stepContext.getStepExecution().getJobParameters().put("directory", "test-conversion");
 
-        CsvToAvroConfig.Conversion conversion = new CsvToAvroConfig.Conversion();
-        conversion.setName("testDirectory");
-        when(csvToAvroConfig.getConversions()).thenReturn(Collections.singletonList(conversion));
-
-        // Build the step
+        // Act
         Step step = csvToAvroConversionStep.csvToAvroConversionStep();
+        step.execute(null, null);
 
-        // Create a JobExecution and StepExecution
-        JobExecution jobExecution = new JobExecution(1L, jobParameters);
-        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", jobExecution);
-        stepExecution.setJobParameters(jobParameters);
-
-        // Execute the step
-        step.execute(stepExecution);
-
-        // Verify that the converter is called
-        verify(csvToAvroConverter).convertCsvToAvro(conversion, "testTargetId");
-
-        // Verify that the step completed successfully
-        assertEquals(BatchStatus.COMPLETED, stepExecution.getStatus());
+        // Assert
+        verify(csvToAvroConverter, times(1)).convertCsvToAvro(conversion, "test-source-dir");
     }
 
     @Test
-    void testCsvToAvroConversionStep_JobNotFound() {
-        // Prepare job parameters
-        JobParameters jobParameters = new JobParametersBuilder()
-                .addString("jobName", "nonExistentJob")
-                .addString("directory", "testDirectory")
-                .toJobParameters();
+    void testCsvToAvroConversionStep_conversionNotFound() {
+        // Arrange
+        when(csvToAvroConfig.getConversions()).thenReturn(List.of());
 
-        // Mock empty job configurations
-        when(ingestionJobConfig.jobs()).thenReturn(Collections.emptyList());
+        StepContext stepContext = StepSynchronizationManager.register(new StepContext(new StepExecution("test-step", null)));
+        stepContext.getStepExecution().getJobParameters().put("jobName", "test-job");
+        stepContext.getStepExecution().getJobParameters().put("directory", "non-existent-conversion");
 
-        // Build the step
-        Step step = csvToAvroConversionStep.csvToAvroConversionStep();
-
-        // Create a JobExecution and StepExecution
-        JobExecution jobExecution = new JobExecution(1L, jobParameters);
-        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", jobExecution);
-        stepExecution.setJobParameters(jobParameters);
-
-        // Execute the step and expect an exception
-        Exception exception = assertThrows(RuntimeException.class, () -> {
-            step.execute(stepExecution);
+        // Act & Assert
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            Step step = csvToAvroConversionStep.csvToAvroConversionStep();
+            step.execute(null, null);
         });
 
-        // Verify exception message
-        assertTrue(exception.getCause().getMessage().contains("Job nonExistentJob not found"));
+        assertTrue(exception.getMessage().contains("Conversion with name non-existent-conversion not found."));
+    }
 
-        // Verify that the converter is not called
-        verifyNoInteractions(csvToAvroConverter);
+    @Test
+    void testCsvToAvroConversionStep_jobNotFound() {
+        // Arrange
+        when(ingestionJobConfig.jobs()).thenReturn(List.of());
+
+        StepContext stepContext = StepSynchronizationManager.register(new StepContext(new StepExecution("test-step", null)));
+        stepContext.getStepExecution().getJobParameters().put("jobName", "non-existent-job");
+        stepContext.getStepExecution().getJobParameters().put("directory", "test-conversion");
+
+        // Act & Assert
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            Step step = csvToAvroConversionStep.csvToAvroConversionStep();
+            step.execute(null, null);
+        });
+
+        assertTrue(exception.getMessage().contains("Job non-existent-job not found"));
+    }
+
+    @Test
+    void testCsvToAvroConversionStep_conversionFails() throws Exception {
+        // Arrange
+        CsvToAvroConfig.Conversion conversion = new CsvToAvroConfig.Conversion("test-conversion");
+        when(csvToAvroConfig.getConversions()).thenReturn(List.of(conversion));
+        IngestionJobConfig.Job job = new IngestionJobConfig.Job("test-job", "test-source-dir");
+        when(ingestionJobConfig.jobs()).thenReturn(List.of(job));
+
+        StepContext stepContext = StepSynchronizationManager.register(new StepContext(new StepExecution("test-step", null)));
+        stepContext.getStepExecution().getJobParameters().put("jobName", "test-job");
+        stepContext.getStepExecution().getJobParameters().put("directory", "test-conversion");
+
+        doThrow(new RuntimeException("Conversion error")).when(csvToAvroConverter).convertCsvToAvro(conversion, "test-source-dir");
+
+        // Act & Assert
+        Exception exception = assertThrows(RuntimeException.class, () -> {
+            Step step = csvToAvroConversionStep.csvToAvroConversionStep();
+            step.execute(null, null);
+        });
+
+        assertTrue(exception.getMessage().contains("Failed to convert CSV to Avro for conversion"));
     }
 }

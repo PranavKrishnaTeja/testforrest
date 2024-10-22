@@ -1,197 +1,116 @@
-import com.schwab.cdt.spos.source.config.CsvToAvroConfig.Conversion;
-import com.schwab.cdt.spos.source.config.CsvToAvroConfig.Conversion.FieldMapping;
-import com.schwab.cdt.spos.source.config.SposConfig;
-import com.schwab.cdt.spos.source.service.AvroSchemaGenerator;
+import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
+import com.schwab.cdt.spos.source.config.IngestionJobConfig;
 import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
-import com.schwab.cdt.spos.source.spos.SposStreamingClient;
-import org.apache.avro.Schema;
+import com.schwab.cdt.spos.source.job.step.CsvToAvroConversionStep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
-import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.services.s3.*;
-import software.amazon.awssdk.services.s3.model.*;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.scope.context.StepContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.transaction.PlatformTransactionManager;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class CsvToAvroConverterTest {
+class CsvToAvroConversionStepTest {
 
     @Mock
-    private AvroSchemaGenerator avroSchemaGenerator;
+    private JobRepository jobRepository;
 
     @Mock
-    private SposStreamingClient sposStreamingClient;
+    private PlatformTransactionManager transactionManager;
 
     @Mock
-    private S3Client s3Client;
+    private CsvToAvroConverter csvToAvroConverter;
 
     @Mock
-    private SposConfig sposConfig;
+    private CsvToAvroConfig csvToAvroConfig;
+
+    @Mock
+    private IngestionJobConfig ingestionJobConfig;
 
     @InjectMocks
-    private CsvToAvroConverter csvToAvroConverter;
+    private CsvToAvroConversionStep csvToAvroConversionStep;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-
-        // Configure mocks
-        when(sposConfig.awsAccessKey()).thenReturn("testAccessKey");
-        when(sposConfig.awsSecretKey()).thenReturn("testSecretKey");
-        when(sposConfig.url()).thenReturn("http://localhost:4566");
-        when(sposConfig.bucket()).thenReturn("test-bucket");
-        when(sposConfig.region()).thenReturn("us-east-1");
-
-        // Create the S3Client with mocked configuration
-        csvToAvroConverter = new CsvToAvroConverter(avroSchemaGenerator, sposStreamingClient, sposConfig);
-
-        // Replace the real S3Client with a mock
-        ReflectionTestUtils.setField(csvToAvroConverter, "s3Client", s3Client);
     }
 
     @Test
-    void testConvertCsvToAvro_Success() throws Exception {
-        // Prepare test data
-        Conversion conversion = new Conversion();
-        conversion.setName("testConversion");
-        conversion.setDelimiter("COMMA");
-        conversion.setSkipPolicy(new Conversion.SkipPolicy(true));
+    void testCsvToAvroConversionStep_Success() throws Exception {
+        // Mock job parameters
+        Map<String, Object> jobParametersMap = new HashMap<>();
+        jobParametersMap.put("jobName", "testJob");
+        jobParametersMap.put("directory", "testDirectory");
 
-        conversion.setAvroSchemaOutput("schema.avsc");
-        conversion.setTargetAvroFile("data.avro");
+        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", new JobExecution(1L));
+        stepExecution.getExecutionContext().put("jobName", "testJob");
+        stepExecution.getExecutionContext().put("directory", "testDirectory");
 
-        FieldMapping fieldMapping1 = new FieldMapping();
-        fieldMapping1.setName("id");
-        fieldMapping1.setType("int");
+        // Mock chunk context
+        ChunkContext chunkContext = new ChunkContext(new StepContext(stepExecution));
 
-        FieldMapping fieldMapping2 = new FieldMapping();
-        fieldMapping2.setName("name");
-        fieldMapping2.setType("string");
+        // Mock job and conversion configurations
+        IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "testTargetId");
+        when(ingestionJobConfig.jobs()).thenReturn(Collections.singletonList(jobConfig));
 
-        conversion.setFieldMappingList(Arrays.asList(fieldMapping1, fieldMapping2));
+        CsvToAvroConfig.Conversion conversion = new CsvToAvroConfig.Conversion();
+        conversion.setName("testDirectory");
+        when(csvToAvroConfig.getConversions()).thenReturn(Collections.singletonList(conversion));
 
-        String sourceDirectory = "/test/source";
+        // Build the step
+        Step step = csvToAvroConversionStep.csvToAvroConversionStep();
 
-        // Mock schema generation
-        Schema schema = new Schema.Parser().parse("{\"type\":\"record\",\"name\":\"TestRecord\",\"fields\":[{\"name\":\"id\",\"type\":\"int\"},{\"name\":\"name\",\"type\":\"string\"}]}");
-        when(avroSchemaGenerator.generateSchema(conversion)).thenReturn(schema);
+        // Extract the tasklet
+        Tasklet tasklet = ((org.springframework.batch.core.step.builder.TaskletStep) step).getTasklet();
 
-        // Mock CSV data
-        String csvData = "id,name\n1,John Doe\n2,Jane Smith";
-        InputStream csvInputStream = new ByteArrayInputStream(csvData.getBytes(StandardCharsets.UTF_8));
-        when(sposStreamingClient.streamObjectStore(anyString())).thenReturn(csvInputStream);
+        // Execute the tasklet
+        RepeatStatus status = tasklet.execute(null, chunkContext);
 
-        // Mock getObjects and getObjectUrl
-        when(sposStreamingClient.getObjects(anyString(), anyInt())).thenReturn(Collections.singletonList("test.csv"));
-        when(sposStreamingClient.getObjectUrl(anyString())).thenReturn("http://spos/test.csv");
+        // Verify that the converter is called
+        verify(csvToAvroConverter).convertCsvToAvro(conversion, "testTargetId");
 
-        // Mock S3 putObject for schema upload
-        doNothing().when(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
-
-        // Mock multipart upload steps
-        CreateMultipartUploadResponse createMultipartUploadResponse = CreateMultipartUploadResponse.builder()
-                .uploadId("testUploadId")
-                .build();
-        when(s3Client.createMultipartUpload(any(CreateMultipartUploadRequest.class))).thenReturn(createMultipartUploadResponse);
-
-        UploadPartResponse uploadPartResponse = UploadPartResponse.builder()
-                .eTag("testETag")
-                .build();
-        when(s3Client.uploadPart(any(UploadPartRequest.class), any(RequestBody.class))).thenReturn(uploadPartResponse);
-
-        CompleteMultipartUploadResponse completeMultipartUploadResponse = CompleteMultipartUploadResponse.builder()
-                .build();
-        when(s3Client.completeMultipartUpload(any(CompleteMultipartUploadRequest.class))).thenReturn(completeMultipartUploadResponse);
-
-        // Execute the method under test
-        csvToAvroConverter.convertCsvToAvro(conversion, sourceDirectory);
-
-        // Verify interactions
-        verify(avroSchemaGenerator).generateSchema(conversion);
-        verify(sposStreamingClient).streamObjectStore(anyString());
-        verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class)); // For schema upload
-        verify(s3Client).createMultipartUpload(any(CreateMultipartUploadRequest.class));
-        verify(s3Client, atLeastOnce()).uploadPart(any(UploadPartRequest.class), any(RequestBody.class));
-        verify(s3Client).completeMultipartUpload(any(CompleteMultipartUploadRequest.class));
+        // Verify that the step completed successfully
+        assertEquals(RepeatStatus.FINISHED, status);
     }
 
     @Test
-    void testConvertCsvToAvro_CsvFileNotFound() throws Exception {
-        // Prepare test data
-        Conversion conversion = new Conversion();
-        conversion.setName("testConversion");
-        conversion.setDelimiter("COMMA");
-        conversion.setSkipPolicy(new Conversion.SkipPolicy(true));
-        conversion.setAvroSchemaOutput("schema.avsc");
-        conversion.setTargetAvroFile("data.avro");
+    void testCsvToAvroConversionStep_JobNotFound() {
+        // Mock job parameters
+        Map<String, Object> jobParametersMap = new HashMap<>();
+        jobParametersMap.put("jobName", "nonExistentJob");
+        jobParametersMap.put("directory", "testDirectory");
 
-        String sourceDirectory = "/test/source";
+        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", new JobExecution(1L));
+        stepExecution.getExecutionContext().put("jobName", "nonExistentJob");
+        stepExecution.getExecutionContext().put("directory", "testDirectory");
 
-        // Mock schema generation
-        Schema schema = new Schema.Parser().parse("{\"type\":\"record\",\"name\":\"TestRecord\",\"fields\":[]}");
-        when(avroSchemaGenerator.generateSchema(conversion)).thenReturn(schema);
+        // Mock chunk context
+        ChunkContext chunkContext = new ChunkContext(new StepContext(stepExecution));
 
-        // Mock CSV data
-        when(sposStreamingClient.streamObjectStore(anyString())).thenReturn(null);
+        // Mock empty job configurations
+        when(ingestionJobConfig.jobs()).thenReturn(Collections.emptyList());
 
-        // Mock getObjects
-        when(sposStreamingClient.getObjects(anyString(), anyInt())).thenReturn(Collections.singletonList("test.csv"));
-        when(sposStreamingClient.getObjectUrl(anyString())).thenReturn("http://spos/test.csv");
+        // Build the step
+        Step step = csvToAvroConversionStep.csvToAvroConversionStep();
 
-        // Execute the method and expect an IOException
-        assertThrows(IOException.class, () -> {
-            csvToAvroConverter.convertCsvToAvro(conversion, sourceDirectory);
+        // Extract the tasklet
+        Tasklet tasklet = ((org.springframework.batch.core.step.builder.TaskletStep) step).getTasklet();
+
+        // Execute the tasklet and expect an exception
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            tasklet.execute(null, chunkContext);
         });
 
-        // Verify interactions
-        verify(sposStreamingClient).streamObjectStore(anyString());
-        verifyNoMoreInteractions(s3Client);
-    }
+        // Verify exception message
+        assertTrue(exception.getMessage().contains("Job nonExistentJob not found"));
 
-    @Test
-    void testConvertCsvToAvro_InvalidCsvFormat() throws Exception {
-        // Prepare test data
-        Conversion conversion = new Conversion();
-        conversion.setName("testConversion");
-        conversion.setDelimiter("COMMA");
-        conversion.setSkipPolicy(new Conversion.SkipPolicy(false));
-
-        FieldMapping fieldMapping1 = new FieldMapping();
-        fieldMapping1.setName("id");
-        fieldMapping1.setType("int");
-
-        conversion.setFieldMappingList(Collections.singletonList(fieldMapping1));
-
-        conversion.setAvroSchemaOutput("schema.avsc");
-        conversion.setTargetAvroFile("data.avro");
-
-        String sourceDirectory = "/test/source";
-
-        // Mock schema generation
-        Schema schema = new Schema.Parser().parse("{\"type\":\"record\",\"name\":\"TestRecord\",\"fields\":[{\"name\":\"id\",\"type\":\"int\"}]}");
-        when(avroSchemaGenerator.generateSchema(conversion)).thenReturn(schema);
-
-        // Mock CSV data with invalid format
-        String csvData = "invalid_data_without_delimiter";
-        InputStream csvInputStream = new ByteArrayInputStream(csvData.getBytes(StandardCharsets.UTF_8));
-        when(sposStreamingClient.streamObjectStore(anyString())).thenReturn(csvInputStream);
-
-        // Mock getObjects
-        when(sposStreamingClient.getObjects(anyString(), anyInt())).thenReturn(Collections.singletonList("test.csv"));
-        when(sposStreamingClient.getObjectUrl(anyString())).thenReturn("http://spos/test.csv");
-
-        // Execute the method and expect a RuntimeException
-        assertThrows(RuntimeException.class, () -> {
-            csvToAvroConverter.convertCsvToAvro(conversion, sourceDirectory);
-        });
-
-        // Verify interactions
-        verify(sposStreamingClient).streamObjectStore(anyString());
-        verifyNoMoreInteractions(s3Client);
+        // Verify that the converter is not called
+        verifyNoInteractions(csvToAvroConverter);
     }
 }

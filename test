@@ -1,4 +1,4 @@
-import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
+ com.schwab.cdt.spos.source.config.CsvToAvroConfig;
 import com.schwab.cdt.spos.source.config.IngestionJobConfig;
 import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
 import org.junit.jupiter.api.BeforeEach;

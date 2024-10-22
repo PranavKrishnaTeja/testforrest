@@ -1,14 +1,12 @@
 import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
 import com.schwab.cdt.spos.source.config.IngestionJobConfig;
-import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
 import com.schwab.cdt.spos.source.job.step.CsvToAvroConversionStep;
+import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
 import org.springframework.batch.core.*;
 import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.scope.context.StepContext;
-import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.*;
@@ -43,17 +41,11 @@ class CsvToAvroConversionStepTest {
 
     @Test
     void testCsvToAvroConversionStep_Success() throws Exception {
-        // Mock job parameters
-        Map<String, Object> jobParametersMap = new HashMap<>();
-        jobParametersMap.put("jobName", "testJob");
-        jobParametersMap.put("directory", "testDirectory");
-
-        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", new JobExecution(1L));
-        stepExecution.getExecutionContext().put("jobName", "testJob");
-        stepExecution.getExecutionContext().put("directory", "testDirectory");
-
-        // Mock chunk context
-        ChunkContext chunkContext = new ChunkContext(new StepContext(stepExecution));
+        // Prepare job parameters
+        JobParameters jobParameters = new JobParametersBuilder()
+                .addString("jobName", "testJob")
+                .addString("directory", "testDirectory")
+                .toJobParameters();
 
         // Mock job and conversion configurations
         IngestionJobConfig.Job jobConfig = new IngestionJobConfig.Job("testJob", "testTargetId");
@@ -66,32 +58,28 @@ class CsvToAvroConversionStepTest {
         // Build the step
         Step step = csvToAvroConversionStep.csvToAvroConversionStep();
 
-        // Extract the tasklet
-        Tasklet tasklet = ((org.springframework.batch.core.step.builder.TaskletStep) step).getTasklet();
+        // Create a JobExecution and StepExecution
+        JobExecution jobExecution = new JobExecution(1L, jobParameters);
+        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", jobExecution);
+        stepExecution.setJobParameters(jobParameters);
 
-        // Execute the tasklet
-        RepeatStatus status = tasklet.execute(null, chunkContext);
+        // Execute the step
+        step.execute(stepExecution);
 
         // Verify that the converter is called
         verify(csvToAvroConverter).convertCsvToAvro(conversion, "testTargetId");
 
         // Verify that the step completed successfully
-        assertEquals(RepeatStatus.FINISHED, status);
+        assertEquals(BatchStatus.COMPLETED, stepExecution.getStatus());
     }
 
     @Test
     void testCsvToAvroConversionStep_JobNotFound() {
-        // Mock job parameters
-        Map<String, Object> jobParametersMap = new HashMap<>();
-        jobParametersMap.put("jobName", "nonExistentJob");
-        jobParametersMap.put("directory", "testDirectory");
-
-        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", new JobExecution(1L));
-        stepExecution.getExecutionContext().put("jobName", "nonExistentJob");
-        stepExecution.getExecutionContext().put("directory", "testDirectory");
-
-        // Mock chunk context
-        ChunkContext chunkContext = new ChunkContext(new StepContext(stepExecution));
+        // Prepare job parameters
+        JobParameters jobParameters = new JobParametersBuilder()
+                .addString("jobName", "nonExistentJob")
+                .addString("directory", "testDirectory")
+                .toJobParameters();
 
         // Mock empty job configurations
         when(ingestionJobConfig.jobs()).thenReturn(Collections.emptyList());
@@ -99,16 +87,18 @@ class CsvToAvroConversionStepTest {
         // Build the step
         Step step = csvToAvroConversionStep.csvToAvroConversionStep();
 
-        // Extract the tasklet
-        Tasklet tasklet = ((org.springframework.batch.core.step.builder.TaskletStep) step).getTasklet();
+        // Create a JobExecution and StepExecution
+        JobExecution jobExecution = new JobExecution(1L, jobParameters);
+        StepExecution stepExecution = new StepExecution("csvToAvroConversionStep", jobExecution);
+        stepExecution.setJobParameters(jobParameters);
 
-        // Execute the tasklet and expect an exception
-        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
-            tasklet.execute(null, chunkContext);
+        // Execute the step and expect an exception
+        Exception exception = assertThrows(RuntimeException.class, () -> {
+            step.execute(stepExecution);
         });
 
         // Verify exception message
-        assertTrue(exception.getMessage().contains("Job nonExistentJob not found"));
+        assertTrue(exception.getCause().getMessage().contains("Job nonExistentJob not found"));
 
         // Verify that the converter is not called
         verifyNoInteractions(csvToAvroConverter);

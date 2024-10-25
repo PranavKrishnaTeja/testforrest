@@ -1,77 +1,93 @@
-import com.schwab.cdt.spos.source.config.CsvToAvroConfig;
-import com.schwab.cdt.spos.source.config.IngestionJobConfig;
-import com.schwab.cdt.spos.source.service.CsvToAvroConverter;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.scope.context.StepContext;
-import org.springframework.batch.core.scope.context.StepSynchronizationManager;
-import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.core.step.job.JobParametersBuilder;
-import org.springframework.batch.core.step.job.StepContribution;
-import org.springframework.transaction.PlatformTransactionManager;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.*;
 
-import static org.mockito.Mockito.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-class CsvToAvroConversionStepTest {
+public class MultipartUploadS3 {
+    
+    private static final String ENDPOINT_URL = "https://your-s3-compatible-storage-url";
+    private static final String ACCESS_KEY = "your-access-key";
+    private static final String SECRET_KEY = "your-secret-key";
+    private static final String BUCKET_NAME = "your-bucket-name";
+    private static final String KEY = "your-file-key";
 
-    @Mock
-    private JobRepository jobRepository;
+    public static void main(String[] args) throws IOException {
+        // Configure the S3 client for S3-compatible storage
+        S3Client s3Client = S3Client.builder()
+                .endpointOverride(URI.create(ENDPOINT_URL))
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
+                .region(Region.US_EAST_1) // Region can be arbitrary for S3-compatible
+                .build();
 
-    @Mock
-    private PlatformTransactionManager transactionManager;
-
-    @Mock
-    private CsvToAvroConverter csvToAvroConverter;
-
-    @Mock
-    private CsvToAvroConfig csvToAvroConfig;
-
-    @Mock
-    private IngestionJobConfig ingestionJobConfig;
-
-    @InjectMocks
-    private CsvToAvroConversionStep csvToAvroConversionStep;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.initMocks(this);
+        File file = new File("path/to/your/large-file");
+        multipartUpload(s3Client, file);
+        s3Client.close();
     }
 
-    @Test
-    void testCsvToAvroConversionStep_success() throws Exception {
-        // Arrange
-        CsvToAvroConfig.Conversion conversion = new CsvToAvroConfig.Conversion("test-conversion");
-        when(csvToAvroConfig.getConversions()).thenReturn(List.of(conversion));
-        IngestionJobConfig.Job job = new IngestionJobConfig.Job("test-job", "test-source-dir");
-        when(ingestionJobConfig.jobs()).thenReturn(List.of(job));
-
-        StepExecution stepExecution = new StepExecution("test-step", new JobExecution(1L));
-        StepSynchronizationManager.register(stepExecution);
+    public static void multipartUpload(S3Client s3Client, File file) throws IOException {
+        // Step 1: Initialize a multipart upload
+        CreateMultipartUploadRequest createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
+                .bucket(BUCKET_NAME)
+                .key(KEY)
+                .build();
         
-        JobParameters jobParameters = new JobParametersBuilder()
-            .addString("jobName", "test-job")
-            .addString("directory", "test-conversion")
-            .toJobParameters();
-        stepExecution.setJobParameters(jobParameters);
+        CreateMultipartUploadResponse createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest);
+        String uploadId = createMultipartUploadResponse.uploadId();
 
-        // Mocking contribution and context
-        StepContribution contribution = mock(StepContribution.class);
-        ChunkContext chunkContext = mock(ChunkContext.class);
-        when(chunkContext.getStepContext()).thenReturn(mock(StepContext.class));
+        // Step 2: Upload parts
+        List<CompletedPart> completedParts = new ArrayList<>();
+        int partSize = 5 * 1024 * 1024; // 5 MB
+        byte[] buffer = new byte[partSize];
+        
+        try (FileInputStream inputStream = new FileInputStream(file)) {
+            int bytesRead;
+            int partNumber = 1;
+            while ((bytesRead = inputStream.read(buffer)) > 0) {
+                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
+                        .bucket(BUCKET_NAME)
+                        .key(KEY)
+                        .uploadId(uploadId)
+                        .partNumber(partNumber)
+                        .build();
 
-        // Act
-        Step step = csvToAvroConversionStep.csvToAvroConversionStep();
-        step.execute(contribution, chunkContext);
+                UploadPartResponse uploadPartResponse = s3Client.uploadPart(uploadPartRequest,
+                        RequestBody.fromBytes(buffer, 0, bytesRead));
+                
+                completedParts.add(CompletedPart.builder()
+                        .partNumber(partNumber)
+                        .eTag(uploadPartResponse.eTag())
+                        .build());
+                
+                partNumber++;
+            }
+        } catch (Exception e) {
+            // Abort the multipart upload in case of failure
+            s3Client.abortMultipartUpload(AbortMultipartUploadRequest.builder()
+                    .bucket(BUCKET_NAME)
+                    .key(KEY)
+                    .uploadId(uploadId)
+                    .build());
+            throw new RuntimeException("Failed to upload parts", e);
+        }
 
-        // Assert
-        verify(csvToAvroConverter, times(1)).convertCsvToAvro(conversion, "test-source-dir");
+        // Step 3: Complete the multipart upload
+        CompleteMultipartUploadRequest completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
+                .bucket(BUCKET_NAME)
+                .key(KEY)
+                .uploadId(uploadId)
+                .multipartUpload(CompletedMultipartUpload.builder().parts(completedParts).build())
+                .build();
+
+        s3Client.completeMultipartUpload(completeMultipartUploadRequest);
+        System.out.println("Multipart upload completed successfully.");
     }
-
-    // Other test cases...
 }

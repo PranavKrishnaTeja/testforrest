@@ -1,93 +1,85 @@
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
-
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
-public class MultipartUploadS3 {
-    
-    private static final String ENDPOINT_URL = "https://your-s3-compatible-storage-url";
-    private static final String ACCESS_KEY = "your-access-key";
-    private static final String SECRET_KEY = "your-secret-key";
-    private static final String BUCKET_NAME = "your-bucket-name";
-    private static final String KEY = "your-file-key";
-
-    public static void main(String[] args) throws IOException {
-        // Configure the S3 client for S3-compatible storage
-        S3Client s3Client = S3Client.builder()
-                .endpointOverride(URI.create(ENDPOINT_URL))
-                .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
-                .region(Region.US_EAST_1) // Region can be arbitrary for S3-compatible
-                .build();
-
-        File file = new File("path/to/your/large-file");
-        multipartUpload(s3Client, file);
-        s3Client.close();
+public boolean shouldSkipForDelimitedLine(String schemaName, List<String> fieldValues) {
+    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
+    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
+            CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
+        return false;
     }
 
-    public static void multipartUpload(S3Client s3Client, File file) throws IOException {
-        // Step 1: Initialize a multipart upload
-        CreateMultipartUploadRequest createMultipartUploadRequest = CreateMultipartUploadRequest.builder()
-                .bucket(BUCKET_NAME)
-                .key(KEY)
-                .build();
-        
-        CreateMultipartUploadResponse createMultipartUploadResponse = s3Client.createMultipartUpload(createMultipartUploadRequest);
-        String uploadId = createMultipartUploadResponse.uploadId();
+    Map<String, FieldSkipPolicy> fieldSkipPolicyMap = schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues();
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
 
-        // Step 2: Upload parts
-        List<CompletedPart> completedParts = new ArrayList<>();
-        int partSize = 5 * 1024 * 1024; // 5 MB
-        byte[] buffer = new byte[partSize];
-        
-        try (FileInputStream inputStream = new FileInputStream(file)) {
-            int bytesRead;
-            int partNumber = 1;
-            while ((bytesRead = inputStream.read(buffer)) > 0) {
-                UploadPartRequest uploadPartRequest = UploadPartRequest.builder()
-                        .bucket(BUCKET_NAME)
-                        .key(KEY)
-                        .uploadId(uploadId)
-                        .partNumber(partNumber)
-                        .build();
+    for (int i = 0; i < fieldMappings.size(); i++) {
+        FieldMapping fieldMapping = fieldMappings.get(i);
+        String fieldName = fieldMapping.getName();
 
-                UploadPartResponse uploadPartResponse = s3Client.uploadPart(uploadPartRequest,
-                        RequestBody.fromBytes(buffer, 0, bytesRead));
-                
-                completedParts.add(CompletedPart.builder()
-                        .partNumber(partNumber)
-                        .eTag(uploadPartResponse.eTag())
-                        .build());
-                
-                partNumber++;
+        if (fieldSkipPolicyMap.containsKey(fieldName)) {
+            String fieldValue = i < fieldValues.size() ? fieldValues.get(i).trim() : "";
+            if (shouldSkipBasedOnField(fieldName, fieldValue, fieldSkipPolicyMap)) {
+                return true;
             }
-        } catch (Exception e) {
-            // Abort the multipart upload in case of failure
-            s3Client.abortMultipartUpload(AbortMultipartUploadRequest.builder()
-                    .bucket(BUCKET_NAME)
-                    .key(KEY)
-                    .uploadId(uploadId)
-                    .build());
-            throw new RuntimeException("Failed to upload parts", e);
+        }
+    }
+
+    return false;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+GenericData.Record writeRecord(Schema schema, SchemaMapping schemaMapping, String[] values) {
+    GenericData.Record avroRecord = new GenericData.Record(schema);
+    List<FieldMapping> fieldMappingList = schemaMapping.getFieldMappingList();
+
+    int dataIndex = 0; // Index for values[]
+    for (FieldMapping fieldMapping : fieldMappingList) {
+        String currentValue = dataIndex >= values.length ? "" : values[dataIndex].trim();
+        dataIndex++; // Always increment dataIndex as we read from values[]
+
+        // Check if we should include this field in the Avro record
+        if (!filteringService.shouldIncludeField(fieldMapping.getName(), schemaMapping)) {
+            continue; // Skip adding this field to the Avro record
         }
 
-        // Step 3: Complete the multipart upload
-        CompleteMultipartUploadRequest completeMultipartUploadRequest = CompleteMultipartUploadRequest.builder()
-                .bucket(BUCKET_NAME)
-                .key(KEY)
-                .uploadId(uploadId)
-                .multipartUpload(CompletedMultipartUpload.builder().parts(completedParts).build())
-                .build();
-
-        s3Client.completeMultipartUpload(completeMultipartUploadRequest);
-        System.out.println("Multipart upload completed successfully.");
+        // Map the value to the Avro record
+        avroRecord.put(fieldMapping.getName(), convertToAvroValue(schema, fieldMapping, currentValue));
     }
+
+    return avroRecord;
+}
+
+
+
+
+
+
+
+
+public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
+    SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
+
+    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
+
+    // Trim tokens if necessary
+    for (int i = 0; i < tokens.length; i++) {
+        tokens[i] = tokens[i].trim();
+    }
+
+    // Check if the row should be skipped
+    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
+        return null; // Skip this record
+    }
+
+    if (tokens.length > schemaMapping.getFieldMappingList().size()) {
+        throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
+    }
+
+    return writeRecord(avroSchema, schemaMapping, tokens);
 }

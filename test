@@ -1,29 +1,24 @@
-@Component
-public class FilteringService {
+@Override
+public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
+    SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
 
-    // Existing code...
+    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
 
-    public boolean shouldSkipLineBasedOnStartingCharacters(String schemaName, String line) {
-        SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
-        if (schemaMapping == null || schemaMapping.getSkipPolicy() == null) {
-            return false;
-        }
-
-        List<String> skipStartsWithValues = schemaMapping.getSkipPolicy().getSkipRowsStartingWith();
-        if (CollectionUtils.isEmpty(skipStartsWithValues)) {
-            return false;
-        }
-
-        for (String value : skipStartsWithValues) {
-            if (line.startsWith(value)) {
-                return true; // Skip this line
-            }
-        }
-
-        return false; // Do not skip
+    // Trim tokens to remove extra whitespace
+    for (int i = 0; i < tokens.length; i++) {
+        tokens[i] = tokens[i].trim();
     }
 
-    // Existing methods...
+    // Check if the row should be skipped
+    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
+        return null; // Skip this record
+    }
+
+    if (tokens.length > schemaMapping.getFieldMappingList().size()) {
+        throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
+    }
+
+    return writeRecord(avroSchema, schemaMapping, tokens);
 }
 
 
@@ -36,37 +31,28 @@ public class FilteringService {
 
 
 
-@Service
-public class DelimitedDataConversionServiceImpl extends AbstractDataConversionService {
 
-    // Existing code...
-
-    public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
-        SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
-
-        // New skip policy check
-        if (filteringService.shouldSkipLineBasedOnStartingCharacters(fileUploadRequest.getSourceSchemaName(), payload)) {
-            return null; // Skip this line
-        }
-
-        String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
-
-        // Trim tokens if necessary
-        for (int i = 0; i < tokens.length; i++) {
-            tokens[i] = tokens[i].trim();
-        }
-
-        // Existing skip logic based on field values
-        if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
-            return null; // Skip this record
-        }
-
-        if (tokens.length > schemaMapping.getFieldMappingList().size()) {
-            throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
-        }
-
-        return writeRecord(avroSchema, schemaMapping, tokens);
+public boolean shouldSkipForDelimitedLine(String schemaName, List<String> fieldValues) {
+    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
+    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
+            CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
+        return false;
     }
 
-    // Existing methods...
+    Map<String, FieldSkipPolicy> fieldSkipPolicyMap = schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues();
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
+
+    for (int i = 0; i < fieldMappings.size(); i++) {
+        FieldMapping fieldMapping = fieldMappings.get(i);
+        String fieldName = fieldMapping.getName();
+
+        if (fieldSkipPolicyMap.containsKey(fieldName)) {
+            String fieldValue = i < fieldValues.size() ? fieldValues.get(i).trim() : "";
+            if (shouldSkipBasedOnField(fieldName, fieldValue, fieldSkipPolicyMap)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }

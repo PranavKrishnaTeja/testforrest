@@ -1,38 +1,25 @@
-public boolean shouldSkipLineBasedOnStartingCharacters(String schemaName, String line) {
-    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
-    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null) {
-        return false;
-    }
+GenericData.Record writeRecord(Schema schema, SchemaMapping schemaMapping, String[] tokens) {
+    GenericData.Record avroRecord = new GenericData.Record(schema);
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
 
-    List<String> skipStartsWithValues = schemaMapping.getSkipPolicy().getSkipRowsStartingWith();
-    if (CollectionUtils.isEmpty(skipStartsWithValues)) {
-        return false;
-    }
-
-    for (String value : skipStartsWithValues) {
-        if (line.startsWith(value)) {
-            return true; // Skip this line
+    for (FieldMapping fieldMapping : fieldMappings) {
+        Integer index = fieldMapping.getIndex();
+        if (index == null || index >= tokens.length) {
+            continue; // Skip if index is not specified or out of bounds
         }
+        String currentValue = tokens[index];
+
+        // Check if we should include this field in the Avro record
+        if (!filteringService.shouldIncludeField(fieldMapping.getName(), schemaMapping)) {
+            continue; // Skip adding this field to the Avro record
+        }
+
+        // Map the value to the Avro record
+        avroRecord.put(fieldMapping.getName(), convertToAvroValue(schema, fieldMapping, currentValue.trim()));
     }
 
-    return false; // Do not skip
+    return avroRecord;
 }
-
-
-
-
-
-
-@Data
-@Builder
-@AllArgsConstructor
-@NoArgsConstructor
-public static class SkipPolicy {
-    private boolean skipFirstLine;
-    private Map<String, FieldSkipPolicy> skipRowsWithFieldValues;
-    private List<String> skipRowsStartingWith; // Add this line
-}
-
 
 
 
@@ -43,25 +30,17 @@ public static class SkipPolicy {
 public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
     SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
 
-    // Check if the line should be skipped based on starting characters
-    if (filteringService.shouldSkipLineBasedOnStartingCharacters(fileUploadRequest.getSourceSchemaName(), payload)) {
-        return null; // Skip this line
-    }
+    // Split the payload
+    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()), -1);
 
-    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
-
-    // Trim tokens if necessary
+    // Trim tokens to remove extra whitespace
     for (int i = 0; i < tokens.length; i++) {
         tokens[i] = tokens[i].trim();
     }
 
-    // Existing skip logic based on field values
-    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
+    // Check if the row should be skipped
+    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), tokens)) {
         return null; // Skip this record
-    }
-
-    if (tokens.length > schemaMapping.getFieldMappingList().size()) {
-        throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
     }
 
     return writeRecord(avroSchema, schemaMapping, tokens);
@@ -71,10 +50,37 @@ public GenericData.Record createAvroRecordFromPayload(String payload, FileUpload
 
 
 
-
-
-for (String value : skipStartsWithValues) {
-    if (line.toLowerCase().startsWith(value.toLowerCase())) {
-        return true; // Skip this line
+public boolean shouldSkipForDelimitedLine(String schemaName, String[] tokens) {
+    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
+    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
+            CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
+        return false;
     }
+
+    Map<String, FieldSkipPolicy> fieldSkipPolicyMap = schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues();
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
+
+    // Build a map of field names to their indices
+    Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
+    for (FieldMapping fieldMapping : fieldMappings) {
+        fieldNameToIndexMap.put(fieldMapping.getName(), fieldMapping.getIndex());
+    }
+
+    // Only process fields involved in skip conditions
+    for (Map.Entry<String, FieldSkipPolicy> entry : fieldSkipPolicyMap.entrySet()) {
+        String fieldName = entry.getKey();
+        FieldSkipPolicy fieldSkipPolicy = entry.getValue();
+
+        Integer index = fieldNameToIndexMap.get(fieldName);
+        if (index == null || index >= tokens.length) {
+            continue; // Field index not specified or out of bounds, skip
+        }
+
+        String fieldValue = tokens[index].trim();
+        if (conditionMatchesForField(fieldSkipPolicy, fieldValue)) {
+            return true; // Skip this line
+        }
+    }
+
+    return false; // Do not skip
 }

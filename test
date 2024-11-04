@@ -1,38 +1,4 @@
-@Override
-public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
-    SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
-
-    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
-
-    // Trim tokens to remove extra whitespace
-    for (int i = 0; i < tokens.length; i++) {
-        tokens[i] = tokens[i].trim();
-    }
-
-    // Check if the row should be skipped
-    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
-        return null; // Skip this record
-    }
-
-    if (tokens.length > schemaMapping.getFieldMappingList().size()) {
-        throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
-    }
-
-    return writeRecord(avroSchema, schemaMapping, tokens);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-public boolean shouldSkipForDelimitedLine(String schemaName, List<String> fieldValues) {
+public boolean shouldSkipForDelimitedLine(String schemaName, String[] tokens) {
     SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
     if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
             CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
@@ -42,17 +8,27 @@ public boolean shouldSkipForDelimitedLine(String schemaName, List<String> fieldV
     Map<String, FieldSkipPolicy> fieldSkipPolicyMap = schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues();
     List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
 
+    // Build a map of field names to their indices
+    Map<String, Integer> fieldNameToIndexMap = new HashMap<>();
     for (int i = 0; i < fieldMappings.size(); i++) {
-        FieldMapping fieldMapping = fieldMappings.get(i);
-        String fieldName = fieldMapping.getName();
+        fieldNameToIndexMap.put(fieldMappings.get(i).getName(), i);
+    }
 
-        if (fieldSkipPolicyMap.containsKey(fieldName)) {
-            String fieldValue = i < fieldValues.size() ? fieldValues.get(i).trim() : "";
-            if (shouldSkipBasedOnField(fieldName, fieldValue, fieldSkipPolicyMap)) {
-                return true;
-            }
+    // Only process fields involved in skip conditions
+    for (Map.Entry<String, FieldSkipPolicy> entry : fieldSkipPolicyMap.entrySet()) {
+        String fieldName = entry.getKey();
+        FieldSkipPolicy fieldSkipPolicy = entry.getValue();
+
+        Integer index = fieldNameToIndexMap.get(fieldName);
+        if (index == null || index >= tokens.length) {
+            continue; // Field not present or index out of bounds, skip
+        }
+
+        String fieldValue = tokens[index].trim();
+        if (conditionMatchesForField(fieldSkipPolicy, fieldValue)) {
+            return true; // Skip this line
         }
     }
 
-    return false;
+    return false; // Do not skip
 }

@@ -1,186 +1,80 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
-
-import com.schwab.cdt.avro.common.config.SchemaConfigProperties;
-import com.schwab.cdt.avro.common.config.SchemaConfigProperties.SchemaMapping;
-import com.schwab.cdt.avro.common.config.SchemaConfigProperties.FieldMapping;
-import com.schwab.cdt.avro.common.config.SchemaConfigProperties.SkipPolicy;
-import com.schwab.cdt.avro.common.config.SchemaConfigProperties.FieldSkipPolicy;
-import com.schwab.cdt.avro.common.enums.Delimiter;
-import com.schwab.cdt.avro.common.enums.GenericDataType;
-import com.schwab.cdt.avro.common.validation.FilteringService;
-import com.schwab.cdt.avro.fileupload.enums.SourceSchemaType;
-
-import java.util.*;
-
-class FilteringServiceTest {
-
-    private SchemaConfigProperties schemaConfigProperties;
-    private FilteringService filteringService;
-
-    @BeforeEach
-    void setUp() {
-        schemaConfigProperties = new SchemaConfigProperties();
-        filteringService = new FilteringService(schemaConfigProperties);
-        Map<String, SchemaMapping> mappingDetails = new HashMap<>();
-        schemaConfigProperties.setMappingDetails(mappingDetails);
-
-        // Create a schema mapping for a DELIMITED file
-        SchemaMapping schemaMapping = SchemaMapping.builder()
-            .type(SourceSchemaType.DELIMITED)
-            .sposFolder("test")
-            .avroSchemaName("test")
-            .delimiter(Delimiter.COMMA) // Assuming comma-delimited file
-            .build();
-
-        // Define field mappings
-        List<FieldMapping> fieldMappingList = new ArrayList<>();
-        fieldMappingList.add(FieldMapping.builder().name("recordType").type(GenericDataType.STRING).build());
-        fieldMappingList.add(FieldMapping.builder().name("field1").type(GenericDataType.STRING).build());
-        fieldMappingList.add(FieldMapping.builder().name("field2").type(GenericDataType.STRING).build());
-        schemaMapping.setFieldMappingList(fieldMappingList);
-
-        // Set up skip policy
-        SkipPolicy skipPolicy = new SkipPolicy();
-        Map<String, FieldSkipPolicy> skipRowsWithFieldValues = new HashMap<>();
-        FieldSkipPolicy fieldSkipPolicy = new FieldSkipPolicy();
-        fieldSkipPolicy.setFieldName("recordType");
-        fieldSkipPolicy.setCondition("EQUALS");
-        fieldSkipPolicy.setValues(Arrays.asList("SKIP"));
-        skipRowsWithFieldValues.put("recordType", fieldSkipPolicy);
-        skipPolicy.setSkipRowsWithFieldValues(skipRowsWithFieldValues);
-        schemaMapping.setSkipPolicy(skipPolicy);
-
-        mappingDetails.put("test", schemaMapping);
+public boolean shouldSkipLineBasedOnStartingCharacters(String schemaName, String line) {
+    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
+    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null) {
+        return false;
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_SkipConditionMatches() {
-        String schemaName = "test";
-        String[] tokens = new String[] {"SKIP", "value1", "value2"};
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertTrue(shouldSkip, "The line should be skipped when the skip condition matches.");
+    List<String> skipStartsWithValues = schemaMapping.getSkipPolicy().getSkipRowsStartingWith();
+    if (CollectionUtils.isEmpty(skipStartsWithValues)) {
+        return false;
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_SkipConditionDoesNotMatch() {
-        String schemaName = "test";
-        String[] tokens = new String[] {"KEEP", "value1", "value2"};
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertFalse(shouldSkip, "The line should not be skipped when the skip condition does not match.");
+    for (String value : skipStartsWithValues) {
+        if (line.startsWith(value)) {
+            return true; // Skip this line
+        }
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_NoSkipPolicy() {
-        String schemaName = "testNoSkipPolicy";
+    return false; // Do not skip
+}
 
-        // Create a schema mapping with no skip policy
-        SchemaMapping schemaMapping = SchemaMapping.builder()
-            .type(SourceSchemaType.DELIMITED)
-            .sposFolder("test")
-            .avroSchemaName("test")
-            .delimiter(Delimiter.COMMA)
-            .build();
 
-        // Set field mapping list
-        List<FieldMapping> fieldMappingList = new ArrayList<>();
-        fieldMappingList.add(FieldMapping.builder().name("field1").type(GenericDataType.STRING).build());
-        fieldMappingList.add(FieldMapping.builder().name("field2").type(GenericDataType.STRING).build());
-        schemaMapping.setFieldMappingList(fieldMappingList);
 
-        schemaConfigProperties.getMappingDetails().put(schemaName, schemaMapping);
 
-        String[] tokens = new String[] {"value1", "value2"};
 
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
 
-        assertFalse(shouldSkip, "The line should not be skipped when there is no skip policy.");
+@Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+public static class SkipPolicy {
+    private boolean skipFirstLine;
+    private Map<String, FieldSkipPolicy> skipRowsWithFieldValues;
+    private List<String> skipRowsStartingWith; // Add this line
+}
+
+
+
+
+
+
+
+
+public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
+    SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
+
+    // Check if the line should be skipped based on starting characters
+    if (filteringService.shouldSkipLineBasedOnStartingCharacters(fileUploadRequest.getSourceSchemaName(), payload)) {
+        return null; // Skip this line
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_FieldNotInFieldMappingList() {
-        String schemaName = "test";
-        String[] tokens = new String[] {"KEEP", "value1", "value2"};
+    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
 
-        // Add a skip policy for a field not in field mappings
-        FieldSkipPolicy fieldSkipPolicy = new FieldSkipPolicy();
-        fieldSkipPolicy.setFieldName("nonExistentField");
-        fieldSkipPolicy.setCondition("EQUALS");
-        fieldSkipPolicy.setValues(Arrays.asList("SKIP"));
-
-        schemaConfigProperties.getMappingDetails().get(schemaName).getSkipPolicy().getSkipRowsWithFieldValues().put("nonExistentField", fieldSkipPolicy);
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertFalse(shouldSkip, "The line should not be skipped when the field is not in field mappings.");
+    // Trim tokens if necessary
+    for (int i = 0; i < tokens.length; i++) {
+        tokens[i] = tokens[i].trim();
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_TokensArrayShorterThanExpected() {
-        String schemaName = "test";
-        String[] tokens = new String[] {"SKIP"}; // Only one token
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertTrue(shouldSkip, "The line should be skipped even if tokens array is shorter, as long as the field value matches.");
+    // Existing skip logic based on field values
+    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), Arrays.asList(tokens))) {
+        return null; // Skip this record
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_ConditionNot() {
-        String schemaName = "test";
-
-        // Update skip policy condition to "NOT"
-        FieldSkipPolicy fieldSkipPolicy = schemaConfigProperties.getMappingDetails()
-            .get(schemaName).getSkipPolicy().getSkipRowsWithFieldValues().get("recordType");
-        fieldSkipPolicy.setCondition("NOT");
-        fieldSkipPolicy.setValues(Arrays.asList("KEEP"));
-
-        String[] tokens = new String[] {"SKIP", "value1", "value2"};
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertTrue(shouldSkip, "The line should be skipped when the field value does not match the 'NOT' condition.");
+    if (tokens.length > schemaMapping.getFieldMappingList().size()) {
+        throw new AvroRecordGenerationException("Expected number of fields: " + schemaMapping.getFieldMappingList().size() + ", actual: " + tokens.length);
     }
 
-    @Test
-    void testShouldSkipForDelimitedLine_ConditionStartsWith() {
-        String schemaName = "test";
+    return writeRecord(avroSchema, schemaMapping, tokens);
+}
 
-        // Update skip policy condition to "STARTS WITH"
-        FieldSkipPolicy fieldSkipPolicy = schemaConfigProperties.getMappingDetails()
-            .get(schemaName).getSkipPolicy().getSkipRowsWithFieldValues().get("recordType");
-        fieldSkipPolicy.setCondition("STARTS WITH");
-        fieldSkipPolicy.setValues(Arrays.asList("SK"));
 
-        String[] tokens = new String[] {"SKIP", "value1", "value2"};
 
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
 
-        assertTrue(shouldSkip, "The line should be skipped when the field value starts with the specified value.");
-    }
 
-    @Test
-    void testShouldSkipForDelimitedLine_FieldValueNull() {
-        String schemaName = "test";
-        String[] tokens = new String[] {null, "value1", "value2"};
 
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
 
-        assertFalse(shouldSkip, "The line should not be skipped when the field value is null.");
-    }
-
-    @Test
-    void testShouldSkipForDelimitedLine_FieldValueEmpty() {
-        String schemaName = "test";
-        String[] tokens = new String[] {"", "value1", "value2"};
-
-        boolean shouldSkip = filteringService.shouldSkipForDelimitedLine(schemaName, tokens);
-
-        assertFalse(shouldSkip, "The line should not be skipped when the field value is empty.");
+for (String value : skipStartsWithValues) {
+    if (line.toLowerCase().startsWith(value.toLowerCase())) {
+        return true; // Skip this line
     }
 }

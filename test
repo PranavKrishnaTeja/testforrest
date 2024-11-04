@@ -32,3 +32,87 @@ public boolean shouldSkipForDelimitedLine(String schemaName, String[] tokens) {
 
     return false; // Do not skip
 }
+
+
+
+
+
+
+
+
+public GenericData.Record createAvroRecordFromPayload(String payload, FileUploadRequest fileUploadRequest, Schema avroSchema) {
+    SchemaMapping schemaMapping = getAndValidateSchemaMapping(fileUploadRequest.getSourceSchemaName());
+
+    String[] tokens = payload.split(Pattern.quote(schemaMapping.getDelimiter().getSymbol()));
+
+    // Trim tokens to remove extra whitespace
+    for (int i = 0; i < tokens.length; i++) {
+        tokens[i] = tokens[i].trim();
+    }
+
+    // Check if the row should be skipped
+    if (filteringService.shouldSkipForDelimitedLine(fileUploadRequest.getSourceSchemaName(), tokens)) {
+        return null; // Skip this record
+    }
+
+    // Proceed to write the record
+    return writeRecord(avroSchema, schemaMapping, tokens);
+}
+
+
+
+
+
+
+
+
+
+
+
+GenericData.Record writeRecord(Schema schema, SchemaMapping schemaMapping, String[] tokens) {
+    GenericData.Record avroRecord = new GenericData.Record(schema);
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
+
+    int tokenIndex = 0;
+    for (FieldMapping fieldMapping : fieldMappings) {
+        String currentValue = tokenIndex >= tokens.length ? "" : tokens[tokenIndex];
+        tokenIndex++;
+
+        // Check if we should include this field in the Avro record
+        if (!filteringService.shouldIncludeField(fieldMapping.getName(), schemaMapping)) {
+            continue; // Skip adding this field to the Avro record
+        }
+
+        // Map the value to the Avro record
+        avroRecord.put(fieldMapping.getName(), convertToAvroValue(schema, fieldMapping, currentValue));
+    }
+
+    return avroRecord;
+}
+
+
+
+
+
+
+
+
+
+
+boolean conditionMatchesForField(FieldSkipPolicy fieldSkipPolicy, String fieldValue) {
+    if (fieldSkipPolicy == null || CollectionUtils.isEmpty(fieldSkipPolicy.getValues())) {
+        return false;
+    }
+
+    String condition = fieldSkipPolicy.getCondition();
+    List<String> values = fieldSkipPolicy.getValues();
+
+    if ("NOT".equalsIgnoreCase(condition)) {
+        return !values.contains(fieldValue);
+    } else if ("STARTS WITH".equalsIgnoreCase(condition)) {
+        return values.stream().anyMatch(fieldValue::startsWith);
+    }
+
+    // Default condition is EQUALS
+    return values.contains(fieldValue);
+}

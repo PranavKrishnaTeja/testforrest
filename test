@@ -1,6 +1,39 @@
 public boolean shouldSkipForDelimitedLine(String schemaName, String[] tokens) {
     SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
     if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
+        CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
+        return false;
+    }
+
+    Map<String, FieldSkipPolicy> fieldSkipPolicyMap = schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues();
+    List<FieldMapping> fieldMappings = schemaMapping.getFieldMappingList();
+
+    return fieldMappings.stream()
+        .filter(fieldMapping -> {
+            Integer index = fieldMapping.getIndex();
+            return index != null && index < tokens.length && fieldSkipPolicyMap.containsKey(fieldMapping.getName());
+        })
+        .anyMatch(fieldMapping -> {
+            Integer index = fieldMapping.getIndex();
+            String fieldValue = tokens[index].trim();
+            FieldSkipPolicy fieldSkipPolicy = fieldSkipPolicyMap.get(fieldMapping.getName());
+            return conditionMatchesForField(fieldSkipPolicy, fieldValue);
+        });
+}
+
+
+
+
+
+
+
+
+
+
+
+public boolean shouldSkipForDelimitedLine(String schemaName, String[] tokens) {
+    SchemaMapping schemaMapping = schemaConfigProperties.getMappingDetails().get(schemaName);
+    if (schemaMapping == null || schemaMapping.getSkipPolicy() == null ||
             CollectionUtils.isEmpty(schemaMapping.getSkipPolicy().getSkipRowsWithFieldValues())) {
         return false;
     }
